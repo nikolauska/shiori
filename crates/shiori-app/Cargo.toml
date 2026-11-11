@@ -15,6 +15,11 @@ shiori-detect.workspace = true
 shiori-store.workspace = true
 shiori-sync.workspace = true
 shiori-library.workspace = true
+anyhow.workspace = true
+jiff.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
