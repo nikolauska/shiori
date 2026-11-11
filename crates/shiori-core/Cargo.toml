@@ -7,8 +7,10 @@ rust-version.workspace = true
 
 [dependencies]
 bitflags.workspace = true
+anitomy-ng.workspace = true
 jiff.workspace = true
 serde.workspace = true
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

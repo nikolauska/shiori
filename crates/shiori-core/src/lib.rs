@@ -15,3 +15,4 @@ pub use date::{FuzzyDate, Season, SeasonName};
 pub use entry::{AnimeSettings, Fields, HistoryItem, ListEntry, ListEntryId, ListStatus};
 pub use episode::{Element, ElementKind, Episode};
 pub use search::{SearchParams, SearchSort};
+pub mod recognition;
