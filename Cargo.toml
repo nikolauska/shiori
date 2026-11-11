@@ -19,6 +19,7 @@ anitomy-ng = "=1.0.10"
 bitflags = { version = "2.13.2", features = ["serde"] }
 caseless = "0.2.2"
 directories = "6.0.0"
+keyring = "4.2.0"
 jiff = { version = "0.2.43", features = ["serde"] }
 regex = "1.13.1"
 rusqlite = { version = "0.42.0", features = ["bundled"] }
