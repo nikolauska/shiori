@@ -10,7 +10,9 @@ bitflags.workspace = true
 anitomy-ng.workspace = true
 jiff.workspace = true
 caseless.workspace = true
+regex.workspace = true
 serde.workspace = true
+tracing.workspace = true
 unicode-normalization.workspace = true
 unicode-properties.workspace = true
 
