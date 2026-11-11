@@ -6,6 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+bitflags.workspace = true
+jiff.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
