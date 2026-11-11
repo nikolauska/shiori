@@ -7,17 +7,20 @@ use std::process::ExitCode;
 use anyhow::{Context as _, Result, anyhow, bail};
 use jiff::Timestamp;
 use shiori_core::entry::is_in_list;
-use shiori_core::{AnimeId, ListEntry, ListStatus, ServiceId};
-use shiori_store::{Accounts, Database, Folders, SecretKey, Secrets, SettingsFile};
+use shiori_core::{AnimeId, ListEntry, ListStatus};
+use shiori_store::SecretKey;
+use shiori_sync::anilist;
 use shiori_sync::anilist::score::{ScoreFormat, format_rating};
-use shiori_sync::anilist::{self, AniList};
-use shiori_sync::{Account, NetworkConfig, ProxyConfig, ProxyKind, Service, ServiceError};
+use shiori_sync::{Account, Service, ServiceError};
 
+use shiori_app::startup::Context;
 use shiori_app::state::{AppEvent, AppState};
 use shiori_app::sync::{Report, synchronize};
 
 pub const USAGE: &str = "\
-Usage: shiori [--debug | --verbose] <command>
+Usage: shiori [--debug | --verbose] [<command>]
+
+Without a command, opens the window.
 
 Commands:
   login                       Sign in to AniList with a token pasted from the browser
@@ -31,84 +34,6 @@ Commands:
 
 Set SHIORI_HOME to a folder to keep all data there instead of the standard
 folders; tokens are then stored in a file in that folder, not the keychain.";
-
-struct Context {
-    folders: Folders,
-    secrets: Secrets,
-    state: AppState,
-}
-
-impl Context {
-    fn open() -> Result<Self> {
-        let home = std::env::var_os("SHIORI_HOME");
-        let folders = match &home {
-            Some(root) => Folders::under(root),
-            None => Folders::standard().context("could not find the home folder")?,
-        };
-        folders.create_all()?;
-        let (_, settings) = SettingsFile::load(&folders.settings_file())?;
-        if settings.service != ServiceId::AniList {
-            bail!(
-                "{} is not supported yet; set sync.service to \"anilist\"",
-                settings.service.name()
-            );
-        }
-        let accounts = Accounts::load(&folders.accounts_file())?;
-        // A custom home is for trying things out; keep its tokens out of the
-        // user's real keychain.
-        let secrets = match home {
-            Some(_) => Secrets::in_file(&folders.secrets_file()),
-            None => Secrets::open(&folders.secrets_file()),
-        };
-        if secrets.is_fallback() && home.is_none() {
-            eprintln!(
-                "No keychain available; tokens are stored in {}",
-                folders.secrets_file().display()
-            );
-        }
-        let db = Database::open(&folders.database_file(settings.service))?;
-        let state = AppState::new(db, settings, accounts)?;
-        Ok(Self {
-            folders,
-            secrets,
-            state,
-        })
-    }
-
-    fn service(&self) -> Result<AniList> {
-        let proxy = &self.state.settings.proxy;
-        let network = NetworkConfig {
-            proxy: Some(ProxyConfig {
-                kind: match proxy.kind {
-                    shiori_store::ProxyKind::Http => ProxyKind::Http,
-                    shiori_store::ProxyKind::Socks5 => ProxyKind::Socks5,
-                },
-                host: proxy.host.clone(),
-                port: proxy.port,
-                username: proxy.username.clone(),
-                password: self
-                    .secrets
-                    .get(SecretKey::ProxyPassword)?
-                    .unwrap_or_default(),
-            }),
-        };
-        Ok(AniList::new(network.client()?))
-    }
-
-    fn account(&self) -> Result<Account> {
-        Ok(Account {
-            username: self.state.accounts.anilist.username.clone(),
-            token: self.secrets.get(SecretKey::AniListToken)?,
-        })
-    }
-
-    fn save_accounts(&self) -> Result<()> {
-        self.state
-            .accounts
-            .save(&self.folders.accounts_file())
-            .map_err(Into::into)
-    }
-}
 
 /// Prints progress to the terminal and remembers whether anything failed.
 #[derive(Default)]
@@ -158,7 +83,7 @@ impl Terminal {
 
 pub fn run(args: &[String]) -> Result<ExitCode> {
     let Some((command, rest)) = args.split_first() else {
-        println!("shiori {}\n\n{USAGE}", env!("CARGO_PKG_VERSION"));
+        crate::ui::run(Context::open()?.with_notice())?;
         return Ok(ExitCode::SUCCESS);
     };
     // One thread is enough: the command-line mode does one request at a
@@ -173,7 +98,7 @@ pub fn run(args: &[String]) -> Result<ExitCode> {
         "set" => runtime.block_on(set(rest)),
         "remove" => runtime.block_on(remove(rest)),
         "help" | "--help" | "-h" => {
-            println!("{USAGE}");
+            println!("shiori {}\n\n{USAGE}", env!("CARGO_PKG_VERSION"));
             Ok(ExitCode::SUCCESS)
         }
         other => bail!("unknown command `{other}`\n\n{USAGE}"),
@@ -181,7 +106,7 @@ pub fn run(args: &[String]) -> Result<ExitCode> {
 }
 
 async fn login() -> Result<ExitCode> {
-    let mut context = Context::open()?;
+    let mut context = Context::open()?.with_notice();
     eprintln!(
         "Open this page, approve Shiori, and copy the token it shows:\n\n  {}\n",
         anilist::authorize_url()
@@ -217,12 +142,12 @@ async fn login() -> Result<ExitCode> {
 }
 
 async fn sync() -> Result<ExitCode> {
-    let mut context = Context::open()?;
+    let mut context = Context::open()?.with_notice();
     sync_and_save(&mut context, &[]).await
 }
 
 fn list() -> Result<ExitCode> {
-    let context = Context::open()?;
+    let context = Context::open()?.with_notice();
     let state = &context.state;
     let format = ScoreFormat::from_name(&state.accounts.anilist.rating_system);
     let mut entries: Vec<&ListEntry> = state
@@ -334,7 +259,7 @@ fn parse_set_args(args: &[String]) -> Result<SetArgs> {
 
 async fn set(args: &[String]) -> Result<ExitCode> {
     let args = parse_set_args(args)?;
-    let mut context = Context::open()?;
+    let mut context = Context::open()?.with_notice();
     let id = AnimeId(args.id);
     if !context.state.anime.contains_key(&id) {
         let anime = match context.service()?.fetch_anime(id).await {
@@ -384,7 +309,7 @@ async fn remove(args: &[String]) -> Result<ExitCode> {
         id.parse()
             .with_context(|| format!("`{id}` is not an anime id"))?,
     );
-    let mut context = Context::open()?;
+    let mut context = Context::open()?.with_notice();
     if !is_in_list(context.state.entries.get(&id)) {
         bail!("{} is not in the list", context.state.title(id));
     }

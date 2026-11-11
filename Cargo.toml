@@ -20,6 +20,11 @@ anyhow = "1.0.104"
 bitflags = { version = "2.13.2", features = ["serde"] }
 caseless = "0.2.2"
 directories = "6.0.0"
+# The UI framework. gpui-component 0.9.1 builds on gpui-pre, a snapshot of
+# Zed's gpui; update the three together.
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-component = "=0.9.1"
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12" }
 keyring = "4.2.0"
 jiff = { version = "0.2.43", features = ["serde"] }
 regex = "1.13.1"
