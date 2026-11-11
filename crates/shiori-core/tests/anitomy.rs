@@ -71,5 +71,9 @@ fn anitomy_test_data() {
         new_failures.is_empty() && new_passes.is_empty(),
         "new failures: {new_failures:#?}\nnow passing: {new_passes:#?}"
     );
-    eprintln!("{} of {} cases pass", cases.len() - failing.len(), cases.len());
+    eprintln!(
+        "{} of {} cases pass",
+        cases.len() - failing.len(),
+        cases.len()
+    );
 }

@@ -9,8 +9,10 @@ rust-version.workspace = true
 bitflags.workspace = true
 anitomy-ng.workspace = true
 jiff.workspace = true
+caseless.workspace = true
 serde.workspace = true
 unicode-normalization.workspace = true
+unicode-properties.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
