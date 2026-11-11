@@ -1,0 +1,9 @@
+{
+  "data": {
+    "Viewer": {
+      "id": 123,
+      "name": "someone",
+      "mediaListOptions": { "scoreFormat": "POINT_10_DECIMAL" }
+    }
+  }
+}

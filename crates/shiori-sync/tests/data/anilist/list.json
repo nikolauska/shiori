@@ -1,0 +1,459 @@
+{
+  "data": {
+    "MediaListCollection": {
+      "lists": [
+        {
+          "entries": [
+            {
+              "id": 111,
+              "status": "CURRENT",
+              "score": 85,
+              "progress": 7,
+              "repeat": 1,
+              "private": true,
+              "notes": "good",
+              "startedAt": {
+                "year": 2026,
+                "month": 10,
+                "day": null
+              },
+              "completedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "updatedAt": 1790000000,
+              "media": {
+                "id": 4224,
+                "title": {
+                  "romaji": "Toradora!",
+                  "english": "Toradora!",
+                  "native": "とらドラ！"
+                },
+                "format": "TV",
+                "status": "FINISHED",
+                "description": "Ryuuji Takasu is a gentle high school student with a love for housework; but in contrast to his kind nature, he has an intimidating face that often gets him labeled as a delinquent. On the other hand is Taiga Aisaka, a small, doll-like student, who is anything but a cute and fragile girl. Equipped with a wooden katana and feisty personality, Taiga is known throughout the school as the \"Palmtop Tiger.\"\n<br><br>\nOne day, an embarrassing mistake causes the two students to cross paths. Ryuuji discovers that Taiga actually has a sweet side: she has a crush on the popular vice president, Yuusaku Kitamura, who happens to be his best friend. But things only get crazier when Ryuuji reveals that he has a crush on Minori Kushieda—Taiga's best friend!\n<br><br>\n<i>Toradora!</i> is a romantic comedy that follows this odd duo as they embark on a quest to help each other with their respective crushes, forming an unlikely alliance in the process.\n",
+                "startDate": {
+                  "year": 2008,
+                  "month": 10,
+                  "day": 2
+                },
+                "endDate": {
+                  "year": 2009,
+                  "month": 3,
+                  "day": 26
+                },
+                "episodes": 25,
+                "duration": 24,
+                "countryOfOrigin": "JP",
+                "trailer": {
+                  "id": "ya570uUgQNc",
+                  "site": "youtube"
+                },
+                "updatedAt": 1794427206,
+                "coverImage": {
+                  "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx4224-PXVMBLNwy2aF.jpg"
+                },
+                "genres": [
+                  "Comedy",
+                  "Drama",
+                  "Romance",
+                  "Slice of Life"
+                ],
+                "synonyms": [
+                  "Tiger X Dragon",
+                  "龙与虎",
+                  "النمر والتنين",
+                  "ยัยเสือใสกับนายหน้าโหด",
+                  "Τίγρης και Δράκος"
+                ],
+                "averageScore": 77,
+                "popularity": 551598,
+                "tags": [
+                  {
+                    "name": "Tsundere",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Love Triangle",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Primarily Teen Cast",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Male Protagonist",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "School",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Heterosexual",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Unrequited Love",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Female Protagonist",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Slapstick",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Family Life",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Food",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Female Harem",
+                    "isMediaSpoiler": true
+                  },
+                  {
+                    "name": "Tragedy",
+                    "isMediaSpoiler": true
+                  },
+                  {
+                    "name": "Fake Relationship",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Teacher",
+                    "isMediaSpoiler": false
+                  }
+                ],
+                "studios": {
+                  "edges": [
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Genco"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Starchild Records"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Magic Capsule"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "NIS America Inc."
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Yomiuri Advertising"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "TV Tokyo Music"
+                      }
+                    },
+                    {
+                      "isMain": true,
+                      "node": {
+                        "name": "J.C.STAFF"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Hanabee Entertainment"
+                      }
+                    }
+                  ]
+                },
+                "nextAiringEpisode": null
+              }
+            },
+            {
+              "id": 222,
+              "status": "REPEATING",
+              "score": 0,
+              "progress": 2,
+              "repeat": 0,
+              "private": false,
+              "notes": null,
+              "startedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "completedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "updatedAt": 1790000000,
+              "media": {
+                "id": 127366,
+                "title": {
+                  "romaji": "Tensei shitara Slime Datta Ken 2nd Season",
+                  "english": null,
+                  "native": null
+                },
+                "format": "TV",
+                "status": "FINISHED",
+                "description": null,
+                "startDate": {
+                  "year": 2021,
+                  "month": 1,
+                  "day": 12
+                },
+                "endDate": {
+                  "year": 2021,
+                  "month": 9,
+                  "day": 21
+                },
+                "episodes": 24,
+                "duration": 24,
+                "countryOfOrigin": "JP",
+                "trailer": null,
+                "updatedAt": 1,
+                "coverImage": {
+                  "extraLarge": null
+                },
+                "genres": [],
+                "synonyms": [],
+                "averageScore": null,
+                "popularity": 1,
+                "tags": [],
+                "studios": {
+                  "edges": []
+                },
+                "nextAiringEpisode": null
+              }
+            },
+            {
+              "id": 333,
+              "status": "COMPLETED",
+              "score": 0,
+              "progress": 0,
+              "repeat": 0,
+              "private": false,
+              "notes": null,
+              "startedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "completedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "updatedAt": 1790000000,
+              "media": null
+            }
+          ]
+        },
+        {
+          "entries": [
+            {
+              "id": 111,
+              "status": "CURRENT",
+              "score": 85,
+              "progress": 7,
+              "repeat": 0,
+              "private": false,
+              "notes": null,
+              "startedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "completedAt": {
+                "year": null,
+                "month": null,
+                "day": null
+              },
+              "updatedAt": 1790000000,
+              "media": {
+                "id": 4224,
+                "title": {
+                  "romaji": "Toradora!",
+                  "english": "Toradora!",
+                  "native": "とらドラ！"
+                },
+                "format": "TV",
+                "status": "FINISHED",
+                "description": "Ryuuji Takasu is a gentle high school student with a love for housework; but in contrast to his kind nature, he has an intimidating face that often gets him labeled as a delinquent. On the other hand is Taiga Aisaka, a small, doll-like student, who is anything but a cute and fragile girl. Equipped with a wooden katana and feisty personality, Taiga is known throughout the school as the \"Palmtop Tiger.\"\n<br><br>\nOne day, an embarrassing mistake causes the two students to cross paths. Ryuuji discovers that Taiga actually has a sweet side: she has a crush on the popular vice president, Yuusaku Kitamura, who happens to be his best friend. But things only get crazier when Ryuuji reveals that he has a crush on Minori Kushieda—Taiga's best friend!\n<br><br>\n<i>Toradora!</i> is a romantic comedy that follows this odd duo as they embark on a quest to help each other with their respective crushes, forming an unlikely alliance in the process.\n",
+                "startDate": {
+                  "year": 2008,
+                  "month": 10,
+                  "day": 2
+                },
+                "endDate": {
+                  "year": 2009,
+                  "month": 3,
+                  "day": 26
+                },
+                "episodes": 25,
+                "duration": 24,
+                "countryOfOrigin": "JP",
+                "trailer": {
+                  "id": "ya570uUgQNc",
+                  "site": "youtube"
+                },
+                "updatedAt": 1794427206,
+                "coverImage": {
+                  "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx4224-PXVMBLNwy2aF.jpg"
+                },
+                "genres": [
+                  "Comedy",
+                  "Drama",
+                  "Romance",
+                  "Slice of Life"
+                ],
+                "synonyms": [
+                  "Tiger X Dragon",
+                  "龙与虎",
+                  "النمر والتنين",
+                  "ยัยเสือใสกับนายหน้าโหด",
+                  "Τίγρης και Δράκος"
+                ],
+                "averageScore": 77,
+                "popularity": 551598,
+                "tags": [
+                  {
+                    "name": "Tsundere",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Love Triangle",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Primarily Teen Cast",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Male Protagonist",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "School",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Heterosexual",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Unrequited Love",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Female Protagonist",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Slapstick",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Family Life",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Food",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Female Harem",
+                    "isMediaSpoiler": true
+                  },
+                  {
+                    "name": "Tragedy",
+                    "isMediaSpoiler": true
+                  },
+                  {
+                    "name": "Fake Relationship",
+                    "isMediaSpoiler": false
+                  },
+                  {
+                    "name": "Teacher",
+                    "isMediaSpoiler": false
+                  }
+                ],
+                "studios": {
+                  "edges": [
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Genco"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Starchild Records"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Magic Capsule"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "NIS America Inc."
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Yomiuri Advertising"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "TV Tokyo Music"
+                      }
+                    },
+                    {
+                      "isMain": true,
+                      "node": {
+                        "name": "J.C.STAFF"
+                      }
+                    },
+                    {
+                      "isMain": false,
+                      "node": {
+                        "name": "Hanabee Entertainment"
+                      }
+                    }
+                  ]
+                },
+                "nextAiringEpisode": null
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

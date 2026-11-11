@@ -1,0 +1,401 @@
+{
+  "data": {
+    "Page": {
+      "media": [
+        {
+          "id": 4224,
+          "title": {
+            "romaji": "Toradora!",
+            "english": "Toradora!",
+            "native": "とらドラ！"
+          },
+          "format": "TV",
+          "status": "FINISHED",
+          "description": "Ryuuji Takasu is a gentle high school student with a love for housework; but in contrast to his kind nature, he has an intimidating face that often gets him labeled as a delinquent. On the other hand is Taiga Aisaka, a small, doll-like student, who is anything but a cute and fragile girl. Equipped with a wooden katana and feisty personality, Taiga is known throughout the school as the \"Palmtop Tiger.\"\n<br><br>\nOne day, an embarrassing mistake causes the two students to cross paths. Ryuuji discovers that Taiga actually has a sweet side: she has a crush on the popular vice president, Yuusaku Kitamura, who happens to be his best friend. But things only get crazier when Ryuuji reveals that he has a crush on Minori Kushieda—Taiga's best friend!\n<br><br>\n<i>Toradora!</i> is a romantic comedy that follows this odd duo as they embark on a quest to help each other with their respective crushes, forming an unlikely alliance in the process.\n",
+          "startDate": {
+            "year": 2008,
+            "month": 10,
+            "day": 2
+          },
+          "endDate": {
+            "year": 2009,
+            "month": 3,
+            "day": 26
+          },
+          "episodes": 25,
+          "duration": 24,
+          "countryOfOrigin": "JP",
+          "trailer": {
+            "id": "ya570uUgQNc",
+            "site": "youtube"
+          },
+          "updatedAt": 1794427206,
+          "coverImage": {
+            "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx4224-PXVMBLNwy2aF.jpg"
+          },
+          "genres": [
+            "Comedy",
+            "Drama",
+            "Romance",
+            "Slice of Life"
+          ],
+          "synonyms": [
+            "Tiger X Dragon",
+            "龙与虎",
+            "النمر والتنين",
+            "ยัยเสือใสกับนายหน้าโหด",
+            "Τίγρης και Δράκος"
+          ],
+          "averageScore": 77,
+          "popularity": 551598,
+          "tags": [
+            {
+              "name": "Tsundere",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Love Triangle",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Primarily Teen Cast",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Male Protagonist",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "School",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Heterosexual",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Unrequited Love",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Female Protagonist",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Slapstick",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Family Life",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Food",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Female Harem",
+              "isMediaSpoiler": true
+            },
+            {
+              "name": "Tragedy",
+              "isMediaSpoiler": true
+            },
+            {
+              "name": "Fake Relationship",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Teacher",
+              "isMediaSpoiler": false
+            }
+          ],
+          "studios": {
+            "edges": [
+              {
+                "isMain": false,
+                "node": {
+                  "name": "Genco"
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "Starchild Records"
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "Magic Capsule"
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "NIS America Inc."
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "Yomiuri Advertising"
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "TV Tokyo Music"
+                }
+              },
+              {
+                "isMain": true,
+                "node": {
+                  "name": "J.C.STAFF"
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "Hanabee Entertainment"
+                }
+              }
+            ]
+          },
+          "nextAiringEpisode": null
+        },
+        {
+          "id": 6127,
+          "title": {
+            "romaji": "Toradora!: SOS!",
+            "english": "Toradora!: SOS! Hurray for Foodies",
+            "native": "とらドラ! SOS!"
+          },
+          "format": "SPECIAL",
+          "status": "FINISHED",
+          "description": "Toradora DVD shorts featuring the miniature forms of the Toradora characters talking about, and eating, food.",
+          "startDate": {
+            "year": 2009,
+            "month": 2,
+            "day": 3
+          },
+          "endDate": {
+            "year": 2009,
+            "month": 8,
+            "day": 26
+          },
+          "episodes": 4,
+          "duration": 5,
+          "countryOfOrigin": "JP",
+          "trailer": null,
+          "updatedAt": 1794402059,
+          "coverImage": {
+            "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/b6127-OFqTxnTmBOM2.png"
+          },
+          "genres": [
+            "Comedy"
+          ],
+          "synonyms": [
+            "Toradora SOS! Hurray for Gourmands"
+          ],
+          "averageScore": 60,
+          "popularity": 22685,
+          "tags": [
+            {
+              "name": "Food",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Chibi",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Surreal Comedy",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Kemonomimi",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Female Protagonist",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Male Protagonist",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Primarily Teen Cast",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Unrequited Love",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "School",
+              "isMediaSpoiler": false
+            }
+          ],
+          "studios": {
+            "edges": [
+              {
+                "isMain": true,
+                "node": {
+                  "name": "J.C.STAFF"
+                }
+              },
+              {
+                "isMain": false,
+                "node": {
+                  "name": "NIS America Inc."
+                }
+              }
+            ]
+          },
+          "nextAiringEpisode": null
+        },
+        {
+          "id": 11553,
+          "title": {
+            "romaji": "Toradora!: Bentou no Gokui",
+            "english": "Toradora!: Bento Battle",
+            "native": "とらドラ！ 弁当の極意"
+          },
+          "format": "OVA",
+          "status": "FINISHED",
+          "description": "An unaired episode included in the Blu-ray box set.<br><br>\nYuusaku brings an extravagant bento box to share with the class, which makes Ryuuji feel inferior about his own bento making skills. Desperate to beat his bentos, Ryuuji obsessively tries to compete against them to the point where he even brings a rice cooker to school. After Taiga brings him some salty onigiri, Ryuuji realises that the true meaning of bentos is not the taste, but the feelings that are put into it.<br><br>\n(Source: Wikipedia)",
+          "startDate": {
+            "year": 2011,
+            "month": 12,
+            "day": 21
+          },
+          "endDate": {
+            "year": 2011,
+            "month": 12,
+            "day": 21
+          },
+          "episodes": 1,
+          "duration": 27,
+          "countryOfOrigin": "JP",
+          "trailer": null,
+          "updatedAt": 1794427247,
+          "coverImage": {
+            "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx11553-wj42fK4eFcvZ.jpg"
+          },
+          "genres": [
+            "Comedy",
+            "Romance",
+            "Slice of Life"
+          ],
+          "synonyms": [
+            "Toradora! Special"
+          ],
+          "averageScore": 72,
+          "popularity": 53442,
+          "tags": [
+            {
+              "name": "Food",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "School",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Tsundere",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Male Protagonist",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Primarily Teen Cast",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Female Protagonist",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Ensemble Cast",
+              "isMediaSpoiler": false
+            },
+            {
+              "name": "Heterosexual",
+              "isMediaSpoiler": false
+            }
+          ],
+          "studios": {
+            "edges": [
+              {
+                "isMain": true,
+                "node": {
+                  "name": "J.C.STAFF"
+                }
+              }
+            ]
+          },
+          "nextAiringEpisode": null
+        },
+        {
+          "id": 206729,
+          "title": {
+            "romaji": "Toradora!: Ami no Monomane 150 Renpatsu!!",
+            "english": null,
+            "native": "とらどら！亜美モノマネ１５０連発！！"
+          },
+          "format": "SPECIAL",
+          "status": "FINISHED",
+          "description": "Scene left out of episode 6 of the main series, later released as a bonus on the Toradora PSP Super Premium DVD Box.<br><br>",
+          "startDate": {
+            "year": 2009,
+            "month": 4,
+            "day": 30
+          },
+          "endDate": {
+            "year": 2009,
+            "month": 4,
+            "day": 30
+          },
+          "episodes": 1,
+          "duration": 2,
+          "countryOfOrigin": "JP",
+          "trailer": null,
+          "updatedAt": 1794388477,
+          "coverImage": {
+            "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/b206729-Eyos8ItNqeN1.jpg"
+          },
+          "genres": [
+            "Comedy",
+            "Slice of Life"
+          ],
+          "synonyms": [],
+          "averageScore": 56,
+          "popularity": 645,
+          "tags": [],
+          "studios": {
+            "edges": [
+              {
+                "isMain": true,
+                "node": {
+                  "name": "J.C.STAFF"
+                }
+              }
+            ]
+          },
+          "nextAiringEpisode": null
+        }
+      ],
+      "pageInfo": {
+        "total": 4,
+        "perPage": 50,
+        "currentPage": 1,
+        "lastPage": 1,
+        "hasNextPage": false
+      }
+    }
+  }
+}

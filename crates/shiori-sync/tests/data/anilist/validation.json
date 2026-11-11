@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "message": "validation",
+      "status": 400,
+      "locations": [{ "line": 2, "column": 3 }],
+      "validation": { "scoreRaw": ["The score raw may not be greater than 100."] }
+    }
+  ],
+  "data": { "SaveMediaListEntry": null }
+}
