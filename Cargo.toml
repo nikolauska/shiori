@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.88"
+
+[workspace.dependencies]
+shiori-core = { path = "crates/shiori-core" }
+shiori-detect = { path = "crates/shiori-detect" }
+shiori-store = { path = "crates/shiori-store" }
+shiori-sync = { path = "crates/shiori-sync" }
+shiori-library = { path = "crates/shiori-library" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

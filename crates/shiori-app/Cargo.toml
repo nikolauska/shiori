@@ -1,0 +1,20 @@
+[package]
+name = "shiori-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "shiori"
+path = "src/main.rs"
+
+[dependencies]
+shiori-core.workspace = true
+shiori-detect.workspace = true
+shiori-store.workspace = true
+shiori-sync.workspace = true
+shiori-library.workspace = true
+
+[lints]
+workspace = true
