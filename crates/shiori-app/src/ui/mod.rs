@@ -43,7 +43,8 @@ impl gpui::Global for TrayGlobal {}
 
 pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Result<()> {
     let model = Model::new(startup)?;
-    gpui_platform::application().run(move |cx: &mut App| {
+    let app = gpui_platform::application().with_assets(gpui_kit_assets::Assets);
+    app.run(move |cx: &mut App| {
         gpui_component::init(cx);
         cx.bind_keys([
             KeyBinding::new("ctrl-s", Synchronize, None),
@@ -69,6 +70,7 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
         // With a tray icon, closing the main window leaves the app running;
         // without one there would be no way back, so it quits as usual.
         let detection = model.read(cx).state().settings.detection_enabled;
+        tracing::debug!("Starting the tray icon");
         if let Some((tray, mut commands)) = tray::start(detection) {
             cx.set_global(TrayGlobal(tray));
             cx.set_quit_mode(QuitMode::Explicit);
@@ -92,6 +94,7 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
             .detach();
         }
 
+        tracing::debug!("Opening the main window");
         if show_main_window(&model, cx).is_none() {
             cx.quit();
             return;
@@ -149,6 +152,7 @@ fn show_main_window(model: &Entity<Model>, cx: &mut App) -> Option<WindowHandle<
     });
     match opened {
         Ok(handle) => {
+            tracing::debug!("Main window opened");
             cx.set_global(MainWindowHandle(Some(handle)));
             Some(handle)
         }
