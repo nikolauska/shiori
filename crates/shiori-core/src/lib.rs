@@ -21,4 +21,8 @@ pub use episode::{Element, ElementKind, Episode};
 pub use queue::QueueItem;
 pub use search::{SearchParams, SearchSort};
 pub use service::ServiceId;
-pub use tracking::UpdateTrigger;
+pub use tracking::{
+    Action, Lookup, Phase, Reason, SessionInput, SessionOutput, UpdateDecision, UpdateSession,
+    UpdateSettings, UpdateState, UpdateTrigger, decide_update, entry_with_episode_watched,
+    watched_episode_number,
+};

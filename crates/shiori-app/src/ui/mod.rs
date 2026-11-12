@@ -7,9 +7,11 @@ mod icons;
 mod inspector;
 mod main_window;
 mod model;
+mod now_playing;
 mod pages;
 mod poster;
 mod style;
+mod tracker;
 mod tray;
 mod widgets;
 
@@ -24,6 +26,7 @@ use shiori_store::{ColorScheme, WindowGeometry};
 use shiori_app::single_instance::Request;
 use shiori_app::startup::Context as Startup;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tracker::{Badge, TrackingEvent};
 use tray::TrayCommand;
 
 use main_window::MainWindow;
@@ -50,7 +53,7 @@ struct MainWindowHandle(Option<WindowHandle<Root>>);
 impl gpui::Global for MainWindowHandle {}
 
 /// The tray icon, kept for as long as the app runs.
-struct TrayGlobal(#[allow(dead_code)] tray::Tray);
+struct TrayGlobal(tray::Tray);
 
 impl gpui::Global for TrayGlobal {}
 
@@ -114,6 +117,8 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
             })
             .detach();
         }
+
+        start_tracking(&model, cx);
 
         tracing::debug!("Opening the main window");
         if show_main_window(&model, cx).is_none() {
@@ -238,5 +243,60 @@ pub fn geometry_of(window: &Window) -> WindowGeometry {
         width: Some(f32::from(bounds.size.width) as u32),
         height: Some(f32::from(bounds.size.height) as u32),
         maximized,
+    }
+}
+
+/// Starts detection, and shows its state in the tray and asks for
+/// confirmations with a desktop notification.
+fn start_tracking(model: &Entity<Model>, cx: &mut App) {
+    cx.subscribe(model, |_, event: &TrackingEvent, cx| {
+        let TrackingEvent::Badge(badge) = *event;
+        if let Some(tray) = cx.try_global::<TrayGlobal>() {
+            tray.0.set_badge(match badge {
+                Badge::None => None,
+                Badge::Identified => Some(style::BADGE_IDENTIFIED),
+                Badge::Unidentified => Some(style::BADGE_UNIDENTIFIED),
+            });
+        }
+    })
+    .detach();
+    model.update(cx, |model, cx| {
+        model.confirm_hook = Some(Box::new(|state, title, cx| {
+            // In the main window the now playing bar already asks.
+            let active = cx
+                .try_global::<MainWindowHandle>()
+                .and_then(|h| h.0)
+                .and_then(|handle| handle.is_active(cx))
+                .unwrap_or(false);
+            if active {
+                return;
+            }
+            let body = format!(
+                "{title}: episode {} is ahead of your progress ({}).",
+                state.episode, state.previous_episode
+            );
+            notify("Confirm list update", body);
+        }));
+        model.start_tracking(cx);
+    });
+}
+
+/// Shows a desktop notification. On Linux this is a D-Bus call that can
+/// take a moment, so it runs off the UI thread.
+fn notify(summary: &'static str, body: String) {
+    let spawned = std::thread::Builder::new()
+        .name("shiori-notify".into())
+        .spawn(move || {
+            if let Err(error) = notify_rust::Notification::new()
+                .appname("Shiori")
+                .summary(summary)
+                .body(&body)
+                .show()
+            {
+                tracing::warn!("Could not show a notification: {error}");
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!("Could not show a notification: {error}");
     }
 }

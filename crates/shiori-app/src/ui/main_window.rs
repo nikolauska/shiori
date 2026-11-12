@@ -20,6 +20,7 @@ use shiori_app::home::continue_watching;
 use super::icons::AppIcon;
 use super::inspector::Inspector;
 use super::model::{Model, UiRequest};
+use super::now_playing;
 use super::pages::{self, Page};
 use super::{About, FocusSearch, GoBack, GoForward, Synchronize, ToggleInspector, style};
 
@@ -474,14 +475,19 @@ impl MainWindow {
             .border_color(theme.border)
             .bg(theme.sidebar)
             .text_xs()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(color)
-                    .child(status.text.clone()),
-            )
+            // While media is detected the bar shows it instead of the last
+            // status message; the sync state stays on the right.
+            .map(|bar| match now_playing::view(&self.model, cx) {
+                Some(playing) => bar.child(playing),
+                None => bar.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(color)
+                        .child(status.text.clone()),
+                ),
+            })
             .child(div().size(px(7.)).rounded_full().bg(dot))
             .child(div().text_color(theme.muted_foreground).child(state))
             .child(

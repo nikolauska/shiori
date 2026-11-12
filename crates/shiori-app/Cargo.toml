@@ -23,6 +23,7 @@ gpui-kit-assets.workspace = true
 image.workspace = true
 gpui_platform.workspace = true
 jiff.workspace = true
+notify-rust.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "sync"] }
 tracing.workspace = true
 tray-icon.workspace = true

@@ -51,13 +51,40 @@ pub fn window_icon() -> Option<Arc<image::RgbaImage>> {
     decode(include_bytes!("../../../../assets/icon-64.png")).map(Arc::new)
 }
 
-/// The app icon for the tray: RGBA pixels and the side length.
-pub fn tray_icon() -> Option<(Vec<u8>, u32)> {
-    decode(include_bytes!("../../../../assets/icon-32.png")).map(|image| {
+/// The app icon for the tray: RGBA pixels and the side length. `badge` is
+/// the color of a dot in the bottom right corner, if any.
+pub fn tray_icon(badge: Option<u32>) -> Option<(Vec<u8>, u32)> {
+    decode(include_bytes!("../../../../assets/icon-32.png")).map(|mut image| {
         let side = image.width();
+        if let Some(color) = badge {
+            draw_badge(&mut image, color);
+        }
         (image.into_raw(), side)
     })
 }
+
+/// A filled dot over a quarter of the icon, with a dark ring so that it
+/// stands out on both light and dark panels.
+fn draw_badge(image: &mut image::RgbaImage, color: u32) {
+    let side = image.width() as f32;
+    let radius = side * 0.24;
+    let ring = radius + side * 0.06;
+    let (cx, cy) = (side - ring, side - ring);
+    let [_, r, g, b] = color.to_be_bytes();
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        let distance = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+        if distance <= radius {
+            *pixel = image::Rgba([r, g, b, 0xff]);
+        } else if distance <= ring {
+            *pixel = image::Rgba([0x1f, 0x1f, 0x23, 0xff]);
+        }
+    }
+}
+
+/// Badge colors: green while the playing episode is recognized, amber
+/// while something plays that Shiori could not recognize.
+pub const BADGE_IDENTIFIED: u32 = 0x22c55e;
+pub const BADGE_UNIDENTIFIED: u32 = 0xf59e0b;
 
 fn decode(png: &[u8]) -> Option<image::RgbaImage> {
     match image::load_from_memory_with_format(png, image::ImageFormat::Png) {

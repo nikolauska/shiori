@@ -24,10 +24,11 @@ const DETECTION: &str = "detection";
 const SETTINGS: &str = "settings";
 const EXIT: &str = "exit";
 
-/// The app icon, or a plain square in the icon's violet if it cannot be
-/// decoded, so the tray never ends up without an icon.
-fn icon() -> Icon {
-    if let Some((rgba, side)) = super::style::tray_icon()
+/// The app icon with an optional badge color, or a plain square in the
+/// icon's violet if it cannot be decoded, so the tray never ends up without
+/// an icon.
+fn icon(badge: Option<u32>) -> Icon {
+    if let Some((rgba, side)) = super::style::tray_icon(badge)
         && let Ok(icon) = Icon::from_rgba(rgba, side, side)
     {
         return icon;
@@ -48,7 +49,7 @@ fn build(detection_enabled: bool) -> Result<TrayIcon, String> {
     ])
     .map_err(|e| e.to_string())?;
     TrayIconBuilder::new()
-        .with_icon(icon())
+        .with_icon(icon(None))
         .with_tooltip("Shiori")
         .with_menu(Box::new(menu))
         // A left click opens the window; the menu is on the right button.
@@ -85,7 +86,22 @@ fn forward_events(sender: UnboundedSender<TrayCommand>) {
 /// Keeps the icon alive for as long as the app runs.
 pub struct Tray {
     #[cfg(not(target_os = "linux"))]
-    _icon: TrayIcon,
+    icon: TrayIcon,
+    /// The icon lives on the GTK thread; badges are sent there.
+    #[cfg(target_os = "linux")]
+    badges: std::sync::mpsc::Sender<Option<u32>>,
+}
+
+impl Tray {
+    /// Shows a dot of this color on the icon, or none.
+    pub fn set_badge(&self, badge: Option<u32>) {
+        #[cfg(target_os = "linux")]
+        let _ = self.badges.send(badge);
+        #[cfg(not(target_os = "linux"))]
+        if let Err(error) = self.icon.set_icon(Some(icon(badge))) {
+            tracing::warn!("Could not change the tray icon: {error}");
+        }
+    }
 }
 
 /// Shows the tray icon. `None` when the system has no tray, in which case
@@ -105,6 +121,7 @@ pub fn start(detection_enabled: bool) -> Option<(Tray, UnboundedReceiver<TrayCom
 #[cfg(target_os = "linux")]
 fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
     let (ready, started) = std::sync::mpsc::sync_channel(1);
+    let (badges, receive_badges) = std::sync::mpsc::channel::<Option<u32>>();
     std::thread::Builder::new()
         .name("shiori-tray".into())
         .spawn(move || {
@@ -113,9 +130,23 @@ fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
                 return;
             }
             match build(detection_enabled) {
-                Ok(icon) => {
+                Ok(tray) => {
                     let _ = ready.send(Ok(()));
+                    // The icon is not Send, so badges are picked up here.
+                    // A quarter second is quick enough for a status dot.
+                    gtk::glib::timeout_add_local(std::time::Duration::from_millis(250), {
+                        let tray = tray.clone();
+                        move || {
+                            if let Some(badge) = receive_badges.try_iter().last()
+                                && let Err(error) = tray.set_icon(Some(icon(badge)))
+                            {
+                                tracing::warn!("Could not change the tray icon: {error}");
+                            }
+                            gtk::glib::ControlFlow::Continue
+                        }
+                    });
                     gtk::main();
+                    let icon = tray;
                     drop(icon);
                 }
                 Err(error) => {
@@ -124,12 +155,15 @@ fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
             }
         })
         .map_err(|e| e.to_string())?;
-    started.recv().map_err(|e| e.to_string())?.map(|()| Tray {})
+    started
+        .recv()
+        .map_err(|e| e.to_string())?
+        .map(|()| Tray { badges })
 }
 
 #[cfg(not(target_os = "linux"))]
 fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
-    build(detection_enabled).map(|icon| Tray { _icon: icon })
+    build(detection_enabled).map(|icon| Tray { icon })
 }
 
 impl std::fmt::Debug for Tray {

@@ -6672,6 +6672,7 @@ dependencies = [
  "gtk",
  "image",
  "jiff",
+ "notify-rust",
  "reqwest",
  "shiori-core",
  "shiori-detect",

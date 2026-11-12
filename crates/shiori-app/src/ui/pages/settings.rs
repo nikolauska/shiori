@@ -288,6 +288,47 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// A checkbox per known player; unchecked ones go in
+    /// `disabled_players`. Browsers are listed too: Streaming turns them all
+    /// off at once, these turn off one.
+    fn players(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let names: Vec<(String, bool)> = self
+            .model
+            .read(cx)
+            .tracker
+            .players
+            .iter()
+            .map(|p| {
+                (
+                    p.name.clone(),
+                    p.kind == shiori_detect::PlayerType::WebBrowser,
+                )
+            })
+            .collect();
+        let boxes = names.into_iter().map(|(name, browser)| {
+            let checked = !self.draft.disabled_players.contains(&name);
+            let id = SharedString::from(format!("player-{name}"));
+            let label = if browser {
+                format!("{name} (web browser)")
+            } else {
+                name.clone()
+            };
+            Checkbox::new(id)
+                .label(label)
+                .checked(checked)
+                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                    let disabled = &mut this.draft.disabled_players;
+                    disabled.retain(|n| *n != name);
+                    if !*checked {
+                        disabled.push(name.clone());
+                        disabled.sort();
+                    }
+                    cx.notify();
+                }))
+        });
+        v_flex().gap_1().children(boxes)
+    }
+
     fn render_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let label = |text: &'static str| div().text_color(muted).child(text);
@@ -387,11 +428,8 @@ impl SettingsView {
                 ))
                 .child(label("Detection interval in seconds"))
                 .child(div().w_24().child(Input::new(&self.detection_interval)))
-                // The list of known players needs the players file parser,
-                // which comes with detection (phase 5).
-                .child(div().text_sm().text_color(muted).child(
-                    "The list of known media players will show here once detection is built.",
-                ))
+                .child(label("Media players"))
+                .child(self.players(cx))
                 .into_any_element(),
             4 => v_flex()
                 .gap_3()

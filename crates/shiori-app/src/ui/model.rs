@@ -22,6 +22,7 @@ use shiori_app::state::{AppEvent, AppState};
 
 use super::format;
 use super::poster::Posters;
+use super::tracker::{ConfirmHook, Tracker};
 
 /// What the status bar shows.
 #[derive(Debug, Clone, Default)]
@@ -47,6 +48,10 @@ pub struct Model {
     session_save: Option<Task<()>>,
     /// The anime shown in the inspector.
     pub selected: Option<AnimeId>,
+    pub tracker: Tracker,
+    /// Called when an update needs the user's say; the UI decides how to
+    /// ask (a notification, unless the main window is active).
+    pub confirm_hook: Option<ConfirmHook>,
 }
 
 impl EventEmitter<AppEvent> for Model {}
@@ -86,6 +91,8 @@ impl Model {
             session,
             session_save: None,
             selected: None,
+            tracker: Tracker::default(),
+            confirm_hook: None,
         })
     }
 
@@ -113,7 +120,7 @@ impl Model {
         cx.notify();
     }
 
-    fn set_error(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+    pub(super) fn set_error(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.status.text = text.into();
         self.status.is_error = true;
         cx.notify();
@@ -323,6 +330,11 @@ impl Model {
                 }
                 Err(error) => self.set_error(format!("Proxy settings: {error:#}"), cx),
             }
+        }
+        let detection_changed = before.detection_enabled != self.state().settings.detection_enabled
+            || before.detection_interval_ms != self.state().settings.detection_interval_ms;
+        if detection_changed {
+            self.detection_settings_changed(cx);
         }
         self.emit(vec![AppEvent::SettingsChanged], cx);
     }

@@ -18,6 +18,7 @@ use shiori_core::{Anime, AnimeId, FuzzyDate, ListEntry, ListStatus};
 use shiori_sync::anilist::score::rating_list;
 
 use super::model::Model;
+use super::tracker::Badge;
 use super::{format, inspector};
 
 /// A menu item's action.
@@ -108,14 +109,27 @@ pub fn context_menu(
     };
     let m = model.clone();
 
-    let mut menu = menu
-        .item(item(
-            "Details",
+    let menu = menu.item(item(
+        "Details",
+        Rc::new({
+            let m = m.clone();
+            move |window, cx| inspector::open(&m, id, window, cx)
+        }),
+    ));
+    // Only while something unrecognized is playing (ui.md).
+    let now_playing = single && model.read(cx).tracker.badge() == Badge::Unidentified;
+    let menu = if now_playing {
+        menu.item(item(
+            "Set as now playing",
             Rc::new({
                 let m = m.clone();
-                move |window, cx| inspector::open(&m, id, window, cx)
+                move |_, cx| m.update(cx, |model, cx| model.set_now_playing(id, cx))
             }),
         ))
+    } else {
+        menu
+    };
+    let mut menu = menu
         .item(item(
             "Links",
             Rc::new(move |_, cx| cx.open_url(&format!("https://anilist.co/anime/{id}"))),

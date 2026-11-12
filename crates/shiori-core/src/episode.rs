@@ -81,9 +81,16 @@ impl Episode {
         self.get(ElementKind::Title)
     }
 
-    /// The parser only produces a file extension for video containers.
+    /// The parser also accepts subtitle and archive extensions (`ass`,
+    /// `srt`, `zip`), so the extension is checked against video containers
+    /// here: a player with subtitles open must not be taken for playing
+    /// them.
     pub fn is_video_file(&self) -> bool {
-        self.has(ElementKind::FileExtension)
+        self.get(ElementKind::FileExtension).is_some_and(|ext| {
+            VIDEO_EXTENSIONS
+                .iter()
+                .any(|video| video.eq_ignore_ascii_case(ext))
+        })
     }
 
     /// First and last episode number. A single episode gives the same number
@@ -107,6 +114,12 @@ impl Episode {
         }
     }
 }
+
+/// The video containers among the extensions the parser knows.
+const VIDEO_EXTENSIONS: [&str; 16] = [
+    "3gp", "avi", "divx", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpg", "ogm", "rm", "rmvb",
+    "ts", "webm", "wmv",
+];
 
 /// Leading digits as a number: `7.5` is 7 and `4a` is 4. Taiga v2 reads these
 /// as 0, which loses the episode; truncating keeps it usable.
@@ -149,5 +162,15 @@ mod tests {
         e.set_episode_number_range((1, 3));
         assert_eq!(e.all(ElementKind::Episode).collect::<Vec<_>>(), ["1", "3"]);
         assert_eq!(e.title(), Some("A"));
+    }
+
+    #[test]
+    fn only_video_extensions_are_video_files() {
+        let with = |ext: &str| Episode::new(vec![Element::new(ElementKind::FileExtension, ext)]);
+        assert!(with("mkv").is_video_file());
+        assert!(with("MP4").is_video_file());
+        assert!(!with("ass").is_video_file());
+        assert!(!with("zip").is_video_file());
+        assert!(!Episode::default().is_video_file());
     }
 }

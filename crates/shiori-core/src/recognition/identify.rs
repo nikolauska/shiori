@@ -30,8 +30,7 @@ fn find(
     if !is_valid_episode_type(episode) {
         return None;
     }
-    let title = episode.title().unwrap_or_default().to_owned();
-    for (id, _) in index.lookup(&title) {
+    for id in candidates(episode, index) {
         let Some(item) = anime.get(&id) else {
             continue;
         };
@@ -53,6 +52,27 @@ fn find(
         }
     }
     None
+}
+
+/// The anime to try, best first. The parser takes "2nd Season" out of the
+/// title into a `Season` element, which would leave "Show 2nd Season - 08"
+/// looking like the first season. So with a season above 1 the title with
+/// the season goes first ("show2" after normalizing, as the index has it),
+/// then the bare title for files that number seasons the index lacks.
+fn candidates(episode: &Episode, index: &TitleIndex) -> Vec<AnimeId> {
+    let title = episode.title().unwrap_or_default();
+    let season = episode
+        .get(ElementKind::Season)
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|&s| s > 1);
+    let mut ids: Vec<AnimeId> = Vec::new();
+    let with_season = season.map(|s| index.lookup(&format!("{title} season {s}")));
+    for (id, _) in with_season.into_iter().flatten().chain(index.lookup(title)) {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
 }
 
 fn format_range((first, last): (u32, u32)) -> String {
@@ -132,6 +152,27 @@ mod tests {
         let id = identify(&mut episode, &f.index, &f.anime, &f.relations);
         assert_eq!(episode.anime_id, id);
         (id.map(|i| i.0), episode.episode_number_range())
+    }
+
+    #[test]
+    fn a_season_in_the_file_name_picks_that_season() {
+        let f = fixture();
+        assert_eq!(
+            run(
+                &f,
+                "[Group] Tensei Shitara Slime Datta Ken 2nd Season - 08 [1080p].mkv"
+            ),
+            (Some(127366), Some((8, 8)))
+        );
+        assert_eq!(
+            run(&f, "[Group] Tensei Shitara Slime Datta Ken S2 - 08.mkv"),
+            (Some(127366), Some((8, 8)))
+        );
+        // A season the index does not know falls back to the bare title.
+        assert_eq!(
+            run(&f, "[Group] Toradora! Season 2 - 05.mkv"),
+            (Some(2), Some((5, 5)))
+        );
     }
 
     #[test]
