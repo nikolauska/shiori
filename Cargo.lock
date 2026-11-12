@@ -6704,6 +6704,14 @@ dependencies = [
 [[package]]
 name = "shiori-detect"
 version = "0.1.0"
+dependencies = [
+ "regex",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows 0.62.2",
+ "x11rb",
+ "zbus",
+]
 
 [[package]]
 name = "shiori-library"

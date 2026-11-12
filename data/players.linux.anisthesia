@@ -1,0 +1,233 @@
+# Media players on Linux for Shiori, in Anisthesia's format (see
+# docs/detection.md). Same layout as players.anisthesia, with Linux names:
+#
+# - executables: the program's file name, as /proc/<pid>/exe shows it.
+# - windows: X11 WM_CLASS values, instance or class. Only the X11 window
+#   title source uses them; they are optional.
+# - strategies: open_files reads /proc/<pid>/fd. window_title reads the
+#   X11 window title. MPRIS is always asked and needs no entry here.
+#   ui_automation does not exist on Linux.
+#
+# Indentation is significant. You must use tabs rather than spaces.
+
+Celluloid
+	windows:
+		io.github.celluloid_player.Celluloid
+		celluloid
+		gnome-mpv
+	executables:
+		celluloid
+		gnome-mpv
+	strategies:
+		open_files
+
+Dragon Player
+	windows:
+		dragon
+	executables:
+		dragon
+	strategies:
+		open_files
+
+GNOME Videos
+	windows:
+		totem
+	executables:
+		totem
+	strategies:
+		open_files
+
+Haruna
+	windows:
+		haruna
+	executables:
+		haruna
+	strategies:
+		open_files
+		window_title:
+			^Haruna|(.+) - Haruna
+
+Kodi
+	windows:
+		Kodi
+	executables:
+		kodi.bin
+		kodi-x11
+		kodi-wayland
+		kodi-gbm
+	strategies:
+		open_files
+
+Media Player Classic Qute Theater
+	windows:
+		mpc-qt
+	executables:
+		mpc-qt
+	strategies:
+		open_files
+		window_title:
+			^Media Player Classic Qute Theater|Media Player Classic Qute Theater - (.+)|.+
+
+MPlayer
+	windows:
+		MPlayer
+		gmplayer
+	executables:
+		mplayer
+		gmplayer
+	strategies:
+		open_files
+
+mpv
+	windows:
+		mpv
+	executables:
+		mpv
+	strategies:
+		open_files
+		# May be in an unexpected format if the "--title" option is used.
+		window_title:
+			^No file - mpv|(.+) - mpv|mpv - (.+)
+
+QMPlay2
+	windows:
+		QMPlay2
+	executables:
+		QMPlay2
+	strategies:
+		open_files
+
+SMPlayer
+	windows:
+		smplayer
+	executables:
+		smplayer
+	strategies:
+		# SMPlayer plays in a separate mpv or mplayer process, which the mpv
+		# and MPlayer entries find. The window title is all SMPlayer has itself.
+		window_title:
+			^SMPlayer|(.+) - SMPlayer|.+
+
+VLC media player
+	windows:
+		vlc
+	executables:
+		vlc
+	strategies:
+		open_files
+		# The last alternative keeps windows such as Preferences, which share
+		# the class name, from being taken for a title.
+		window_title:
+			^VLC media player|(.+) - VLC media player|.+
+
+################################################################################
+# Web browsers
+#
+# Streaming pages come from MPRIS (most browsers publish what a tab is
+# playing) and from the X11 window title.
+
+Brave Browser
+	windows:
+		brave-browser
+	executables:
+		brave
+	strategies:
+		window_title:
+			^(.+) \(Private\)(?: - Brave)?|(.+) - Brave|(.+)
+	type:
+		web_browser
+
+Chromium
+	windows:
+		chromium
+		chromium-browser
+	executables:
+		chromium
+		chromium-browser
+	strategies:
+		window_title:
+			^(.+) \(Incognito\)(?: - Chromium)?|(.+) - Chromium|(.+)
+	type:
+		web_browser
+
+Google Chrome
+	windows:
+		google-chrome
+	executables:
+		chrome
+	strategies:
+		window_title:
+			^(.+) \(Incognito\)(?: - Google Chrome)?|(.+) - Google Chrome|(.+)
+	type:
+		web_browser
+
+LibreWolf
+	windows:
+		librewolf
+		LibreWolf
+	executables:
+		librewolf
+	strategies:
+		window_title:
+			^(.+) (?:-|—) LibreWolf(?: Private Browsing)?
+	type:
+		web_browser
+
+Microsoft Edge
+	windows:
+		microsoft-edge
+	executables:
+		msedge
+	strategies:
+		window_title:
+			^(.+) and \d+ more pages? - .+|(.+) - [^-]+ - Microsoft.*Edge|(.+)
+	type:
+		web_browser
+
+Mozilla Firefox
+	windows:
+		firefox
+		Navigator
+	executables:
+		firefox
+		firefox-bin
+		firefox-esr
+	strategies:
+		window_title:
+			^(?:Mozilla Firefox|Firefox Developer Edition)|(.+) (?:-|—) (?:Mozilla Firefox|Firefox Developer Edition)(?: \(?Private Browsing\)?)?
+	type:
+		web_browser
+
+Opera
+	windows:
+		opera
+	executables:
+		opera
+	strategies:
+		window_title:
+			^(.+) - Opera(?: \(Private\))?
+	type:
+		web_browser
+
+Vivaldi
+	windows:
+		vivaldi-stable
+		vivaldi
+	executables:
+		vivaldi-bin
+	strategies:
+		window_title:
+			^(.+) - Vivaldi|(.+)
+	type:
+		web_browser
+
+Waterfox
+	windows:
+		waterfox
+	executables:
+		waterfox
+	strategies:
+		window_title:
+			^(.+) - Waterfox(?: \(Private Browsing\))?
+	type:
+		web_browser
