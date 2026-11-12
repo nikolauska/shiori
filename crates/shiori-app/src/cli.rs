@@ -13,6 +13,7 @@ use shiori_sync::anilist;
 use shiori_sync::anilist::score::{ScoreFormat, format_rating};
 use shiori_sync::{Account, Service, ServiceError};
 
+use shiori_app::single_instance::{self, Instance};
 use shiori_app::startup::Context;
 use shiori_app::state::{AppEvent, AppState};
 use shiori_app::sync::{Report, synchronize};
@@ -83,7 +84,20 @@ impl Terminal {
 
 pub fn run(args: &[String]) -> Result<ExitCode> {
     let Some((command, rest)) = args.split_first() else {
-        crate::ui::run(Context::open()?.with_notice())?;
+        let folders = shiori_app::startup::folders()?;
+        let instance = match single_instance::claim(&folders.data) {
+            Ok(Instance::Other) => {
+                eprintln!("Shiori is already running; showing its window.");
+                return Ok(ExitCode::SUCCESS);
+            }
+            Ok(Instance::First(requests)) => Some(requests),
+            // Better a second copy than no app at all.
+            Err(error) => {
+                tracing::warn!("Could not check for another running copy: {error}");
+                None
+            }
+        };
+        crate::ui::run(Context::open()?.with_notice(), instance)?;
         return Ok(ExitCode::SUCCESS);
     };
     // One thread is enough: the command-line mode does one request at a

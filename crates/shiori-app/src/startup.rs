@@ -9,6 +9,15 @@ use shiori_sync::{Account, NetworkConfig, ProxyConfig, ProxyKind};
 
 use crate::state::AppState;
 
+/// The folders in use: under `SHIORI_HOME` when it is set, the standard
+/// per-user folders otherwise.
+pub fn folders() -> Result<Folders> {
+    match std::env::var_os("SHIORI_HOME") {
+        Some(root) => Ok(Folders::under(root)),
+        None => Folders::standard().context("could not find the home folder"),
+    }
+}
+
 #[derive(Debug)]
 pub struct Context {
     pub folders: Folders,
@@ -23,10 +32,7 @@ pub struct Context {
 impl Context {
     pub fn open() -> Result<Self> {
         let home = std::env::var_os("SHIORI_HOME");
-        let folders = match &home {
-            Some(root) => Folders::under(root),
-            None => Folders::standard().context("could not find the home folder")?,
-        };
+        let folders = folders()?;
         folders.create_all()?;
         let (settings_file, settings) = SettingsFile::load(&folders.settings_file())?;
         if settings.service != ServiceId::AniList {

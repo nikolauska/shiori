@@ -4,6 +4,7 @@
 pub mod export;
 pub mod list_view;
 pub mod posters;
+pub mod single_instance;
 pub mod startup;
 pub mod state;
 pub mod sync;

@@ -8,24 +8,40 @@ mod main_window;
 mod model;
 mod pages;
 mod poster;
+mod tray;
 mod widgets;
 
 use anyhow::Result;
 use gpui::{
-    App, AppContext as _, Bounds, KeyBinding, Pixels, Size, Window, WindowBounds, WindowOptions,
-    point, px, size,
+    App, AppContext as _, Bounds, Entity, KeyBinding, Pixels, QuitMode, Size, Window, WindowBounds,
+    WindowHandle, WindowOptions, point, px, size,
 };
 use gpui_component::{Root, Theme, ThemeMode};
 use shiori_store::{ColorScheme, WindowGeometry};
 
+use shiori_app::single_instance::Request;
 use shiori_app::startup::Context as Startup;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tray::TrayCommand;
 
 use main_window::MainWindow;
 use model::Model;
 
 gpui::actions!(shiori, [Synchronize, GoBack, GoForward, About, Quit]);
 
-pub fn run(startup: Startup) -> Result<()> {
+/// The main window while it is open. Closing it to the tray drops it; it
+/// is opened again from the tray or by a second start of the app.
+#[derive(Default)]
+struct MainWindowHandle(Option<WindowHandle<Root>>);
+
+impl gpui::Global for MainWindowHandle {}
+
+/// The tray icon, kept for as long as the app runs.
+struct TrayGlobal(#[allow(dead_code)] tray::Tray);
+
+impl gpui::Global for TrayGlobal {}
+
+pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Result<()> {
     let model = Model::new(startup)?;
     gpui_platform::application().run(move |cx: &mut App| {
         gpui_component::init(cx);
@@ -49,19 +65,34 @@ pub fn run(startup: Startup) -> Result<()> {
             })
             .detach();
         });
-        let geometry = model.read(cx).session.main_window;
-        let options = WindowOptions {
-            window_bounds: Some(window_bounds(&geometry, size(px(1200.), px(760.)), cx)),
-            ..WindowOptions::default()
-        };
-        let opened = cx.open_window(options, |window, cx| {
-            apply_color_scheme(model.read(cx).state().settings.color_scheme, window, cx);
-            window.set_window_title("Shiori");
-            let view = cx.new(|cx| MainWindow::new(model.clone(), window, cx));
-            cx.new(|cx| Root::new(view, window, cx))
-        });
-        if let Err(error) = opened {
-            tracing::error!("Could not open the main window: {error:#}");
+
+        // With a tray icon, closing the main window leaves the app running;
+        // without one there would be no way back, so it quits as usual.
+        let detection = model.read(cx).state().settings.detection_enabled;
+        if let Some((tray, mut commands)) = tray::start(detection) {
+            cx.set_global(TrayGlobal(tray));
+            cx.set_quit_mode(QuitMode::Explicit);
+            let model = model.clone();
+            cx.spawn(async move |cx| {
+                while let Some(command) = commands.recv().await {
+                    let model = model.clone();
+                    cx.update(|cx| on_tray_command(command, &model, cx));
+                }
+            })
+            .detach();
+        }
+        if let Some(mut requests) = instance {
+            let model = model.clone();
+            cx.spawn(async move |cx| {
+                while let Some(Request::Show) = requests.recv().await {
+                    let model = model.clone();
+                    cx.update(|cx| show_main_window(&model, cx));
+                }
+            })
+            .detach();
+        }
+
+        if show_main_window(&model, cx).is_none() {
             cx.quit();
             return;
         }
@@ -73,6 +104,59 @@ pub fn run(startup: Startup) -> Result<()> {
         });
     });
     Ok(())
+}
+
+fn on_tray_command(command: TrayCommand, model: &Entity<Model>, cx: &mut App) {
+    match command {
+        TrayCommand::Show => {
+            show_main_window(model, cx);
+        }
+        TrayCommand::Synchronize => model.update(cx, |model, cx| model.synchronize(cx)),
+        TrayCommand::ToggleDetection => model.update(cx, |model, cx| {
+            model.toggle_setting(|s| s.detection_enabled = !s.detection_enabled, cx)
+        }),
+        TrayCommand::Settings => {
+            if let Some(handle) = show_main_window(model, cx) {
+                let model = model.clone();
+                let _ = handle.update(cx, |_, window, cx| {
+                    pages::settings::open(&model, window, cx)
+                });
+            }
+        }
+        TrayCommand::Exit => cx.quit(),
+    }
+}
+
+/// Raises the main window, opening it again if it was closed.
+fn show_main_window(model: &Entity<Model>, cx: &mut App) -> Option<WindowHandle<Root>> {
+    if let Some(handle) = cx.try_global::<MainWindowHandle>().and_then(|h| h.0)
+        && handle
+            .update(cx, |_, window, _| window.activate_window())
+            .is_ok()
+    {
+        return Some(handle);
+    }
+    let geometry = model.read(cx).session.main_window;
+    let options = WindowOptions {
+        window_bounds: Some(window_bounds(&geometry, size(px(1200.), px(760.)), cx)),
+        ..WindowOptions::default()
+    };
+    let opened = cx.open_window(options, |window, cx| {
+        apply_color_scheme(model.read(cx).state().settings.color_scheme, window, cx);
+        window.set_window_title("Shiori");
+        let view = cx.new(|cx| MainWindow::new(model.clone(), window, cx));
+        cx.new(|cx| Root::new(view, window, cx))
+    });
+    match opened {
+        Ok(handle) => {
+            cx.set_global(MainWindowHandle(Some(handle)));
+            Some(handle)
+        }
+        Err(error) => {
+            tracing::error!("Could not open the main window: {error:#}");
+            None
+        }
+    }
 }
 
 /// Light, dark, or whatever the system uses.
