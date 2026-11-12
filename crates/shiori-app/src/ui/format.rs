@@ -174,6 +174,8 @@ pub fn cell(
             .map(|e| e.last_updated.strftime("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_default(),
         ListColumn::Notes => entry.map(|e| e.notes.clone()).unwrap_or_default(),
+        // Sorts only; the table never shows them as columns.
+        ListColumn::NewEpisodes | ListColumn::NextAiring => String::new(),
     }
 }
 

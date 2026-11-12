@@ -11,7 +11,7 @@ use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 use shiori_core::{AnimeId, Fields, HistoryItem, QueueItem};
 
 use crate::ui::model::Model;
-use crate::ui::{actions, details};
+use crate::ui::{actions, inspector};
 
 fn time_label(time: jiff::Timestamp) -> String {
     time.to_zoned(jiff::tz::TimeZone::system())
@@ -86,7 +86,7 @@ impl TableDelegate for HistoryDelegate {
         let m = model.clone();
         menu.item(
             PopupMenuItem::new("Details")
-                .on_click(move |_, window, cx| details::open(&m, item.anime_id, window, cx)),
+                .on_click(move |_, window, cx| inspector::open(&m, item.anime_id, window, cx)),
         )
         .item(
             PopupMenuItem::new("Remove...").on_click(move |_, window, cx| {
@@ -213,7 +213,7 @@ impl HistoryPage {
                 if let TableEvent::DoubleClickedRow(row) = event
                     && let Some(id) = table.read(cx).delegate().rows.get(*row).map(|i| i.anime_id)
                 {
-                    details::open(&this.model, id, window, cx);
+                    inspector::open(&this.model, id, window, cx);
                 }
             }),
             cx.subscribe_in(&queue, window, |this, table, event, window, cx| {
@@ -221,7 +221,7 @@ impl HistoryPage {
                     let id: Option<AnimeId> =
                         table.read(cx).delegate().rows.get(*row).map(|i| i.anime_id);
                     if let Some(id) = id {
-                        details::open(&this.model, id, window, cx);
+                        inspector::open(&this.model, id, window, cx);
                     }
                 }
             }),

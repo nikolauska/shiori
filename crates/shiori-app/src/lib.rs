@@ -2,6 +2,7 @@
 //! binary's command-line mode and the UI both drive these.
 
 pub mod export;
+pub mod home;
 pub mod list_view;
 pub mod posters;
 pub mod single_instance;

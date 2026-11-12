@@ -22,8 +22,14 @@ pub struct WindowGeometry {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewMode {
+    /// Rich rows with posters, the default since the redesign (I22).
+    /// Files from before it say `list` for the only list view there was,
+    /// which now opens as rows, so the redesign reaches existing users.
     #[default]
-    List,
+    #[serde(alias = "list")]
+    Rows,
+    /// The detailed table.
+    Table,
     Cards,
 }
 
@@ -51,9 +57,9 @@ pub struct SearchFilters {
 #[serde(default, rename_all = "camelCase")]
 pub struct Session {
     pub main_window: WindowGeometry,
-    pub details_window: WindowGeometry,
-    /// Fraction of the details window given to the left pane.
-    pub details_splitter: Option<f32>,
+    /// Width of the inspector panel in pixels.
+    pub inspector_width: Option<f32>,
+    pub inspector_hidden: bool,
     pub anime_list: ListView,
     pub search_list: ListView,
     pub search_filters: SearchFilters,
@@ -86,12 +92,8 @@ mod tests {
                 height: Some(720),
                 maximized: true,
             },
-            details_window: WindowGeometry {
-                width: Some(800),
-                height: Some(600),
-                ..WindowGeometry::default()
-            },
-            details_splitter: Some(0.25),
+            inspector_width: Some(320.0),
+            inspector_hidden: true,
             anime_list: ListView {
                 sort_column: "title".into(),
                 sort_descending: true,
@@ -109,6 +111,22 @@ mod tests {
         };
         session.save(&path).unwrap();
         assert_eq!(Session::load(&path).unwrap(), session);
+    }
+
+    #[test]
+    fn old_details_window_keys_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.toml");
+        std::fs::write(
+            &path,
+            "detailsSplitter = 0.3\n[detailsWindow]\nwidth = 900\n[animeList]\nviewMode = \"list\"\n",
+        )
+        .unwrap();
+        let session = Session::load(&path).unwrap();
+        assert_eq!(session.anime_list.view_mode, ViewMode::Rows);
+        assert_eq!(session.inspector_width, None);
+        // A file from before the redesign has no view mode for search.
+        assert_eq!(session.search_list.view_mode, ViewMode::Rows);
     }
 
     #[test]

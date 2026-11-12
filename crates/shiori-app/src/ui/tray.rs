@@ -24,26 +24,16 @@ const DETECTION: &str = "detection";
 const SETTINGS: &str = "settings";
 const EXIT: &str = "exit";
 
-/// A bookmark ribbon ("shiori" is Japanese for bookmark), drawn here so the
-/// app ships no image file for it.
+/// The app icon, or a plain square in the icon's violet if it cannot be
+/// decoded, so the tray never ends up without an icon.
 fn icon() -> Icon {
-    const SIZE: u32 = 32;
-    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let inside_band = (8..24).contains(&x) && (3..29).contains(&y);
-            // The notch at the bottom: a V cut into the band.
-            // Measured in half pixels so the V is centered on the band.
-            let notch = y > 20 && (2 * x + 1).abs_diff(32) < 2 * (y - 20);
-            let on = inside_band && !notch;
-            rgba.extend_from_slice(if on {
-                &[0xE0, 0x4F, 0x5F, 0xFF]
-            } else {
-                &[0, 0, 0, 0]
-            });
-        }
+    if let Some((rgba, side)) = super::style::tray_icon()
+        && let Ok(icon) = Icon::from_rgba(rgba, side, side)
+    {
+        return icon;
     }
-    Icon::from_rgba(rgba, SIZE, SIZE).expect("the icon is 32 by 32 RGBA")
+    let rgba = [0x7c, 0x6c, 0xf8, 0xff].repeat(16 * 16);
+    Icon::from_rgba(rgba, 16, 16).expect("a 16 by 16 RGBA square")
 }
 
 fn build(detection_enabled: bool) -> Result<TrayIcon, String> {

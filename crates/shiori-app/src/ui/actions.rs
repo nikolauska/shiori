@@ -18,7 +18,7 @@ use shiori_core::{Anime, AnimeId, FuzzyDate, ListEntry, ListStatus};
 use shiori_sync::anilist::score::rating_list;
 
 use super::model::Model;
-use super::{details, format};
+use super::{format, inspector};
 
 /// A menu item's action.
 pub type Handler = dyn Fn(&mut Window, &mut App);
@@ -113,7 +113,7 @@ pub fn context_menu(
             "Details",
             Rc::new({
                 let m = m.clone();
-                move |window, cx| details::open(&m, id, window, cx)
+                move |window, cx| inspector::open(&m, id, window, cx)
             }),
         ))
         .item(item(

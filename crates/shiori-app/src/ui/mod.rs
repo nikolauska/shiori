@@ -2,12 +2,14 @@
 
 mod actions;
 mod anime_view;
-mod details;
 mod format;
+mod icons;
+mod inspector;
 mod main_window;
 mod model;
 mod pages;
 mod poster;
+mod style;
 mod tray;
 mod widgets;
 
@@ -27,7 +29,18 @@ use tray::TrayCommand;
 use main_window::MainWindow;
 use model::Model;
 
-gpui::actions!(shiori, [Synchronize, GoBack, GoForward, About, Quit]);
+gpui::actions!(
+    shiori,
+    [
+        Synchronize,
+        GoBack,
+        GoForward,
+        About,
+        Quit,
+        ToggleInspector,
+        FocusSearch
+    ]
+);
 
 /// The main window while it is open. Closing it to the tray drops it; it
 /// is opened again from the tray or by a second start of the app.
@@ -43,7 +56,7 @@ impl gpui::Global for TrayGlobal {}
 
 pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Result<()> {
     let model = Model::new(startup)?;
-    let app = gpui_platform::application().with_assets(gpui_kit_assets::Assets);
+    let app = gpui_platform::application().with_assets(icons::Assets);
     app.run(move |cx: &mut App| {
         gpui_component::init(cx);
         cx.bind_keys([
@@ -52,7 +65,15 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
             KeyBinding::new("alt-right", GoForward, None),
             KeyBinding::new("ctrl-q", Quit, None),
             KeyBinding::new("f1", About, None),
+            KeyBinding::new("ctrl-k", FocusSearch, None),
+            KeyBinding::new("ctrl-i", ToggleInspector, None),
             KeyBinding::new("enter", anime_view::OpenSelected, Some("AnimeView")),
+            // "+" is shift-= on most layouts; = alone is accepted too so the
+            // key works without Shift.
+            KeyBinding::new("+", anime_view::Increment, Some("AnimeView")),
+            KeyBinding::new("shift-=", anime_view::Increment, Some("AnimeView")),
+            KeyBinding::new("=", anime_view::Increment, Some("AnimeView")),
+            KeyBinding::new("-", anime_view::Decrement, Some("AnimeView")),
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
 
@@ -141,7 +162,11 @@ fn show_main_window(model: &Entity<Model>, cx: &mut App) -> Option<WindowHandle<
     }
     let geometry = model.read(cx).session.main_window;
     let options = WindowOptions {
-        window_bounds: Some(window_bounds(&geometry, size(px(1200.), px(760.)), cx)),
+        window_bounds: Some(window_bounds(&geometry, size(px(1280.), px(800.)), cx)),
+        // Lets desktops match the window to shiori.desktop and its icon; the
+        // icon itself is only used by X11.
+        app_id: Some("shiori".into()),
+        icon: style::window_icon(),
         ..WindowOptions::default()
     };
     let opened = cx.open_window(options, |window, cx| {

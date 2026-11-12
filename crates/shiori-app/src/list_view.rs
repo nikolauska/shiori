@@ -4,9 +4,13 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use shiori_core::anime::airing_status;
 use shiori_core::date::Season;
 use shiori_core::entry::is_in_list;
-use shiori_core::{Anime, AnimeId, ListEntry, ListStatus};
+use shiori_core::{AiringStatus, Anime, AnimeId, ListEntry, ListStatus};
 
 use crate::state::AppState;
 
@@ -35,6 +39,10 @@ pub enum ListColumn {
     Completed,
     LastUpdated,
     Notes,
+    /// Not a table column; a sort for the rows and cards views.
+    NewEpisodes,
+    /// Not a table column; soonest next episode first.
+    NextAiring,
 }
 
 impl ListColumn {
@@ -67,6 +75,8 @@ impl ListColumn {
             ListColumn::Completed => "Completed",
             ListColumn::LastUpdated => "Last updated",
             ListColumn::Notes => "Notes",
+            ListColumn::NewEpisodes => "New episodes",
+            ListColumn::NextAiring => "Next airing",
         }
     }
 
@@ -85,11 +95,41 @@ impl ListColumn {
             ListColumn::Completed => "completed",
             ListColumn::LastUpdated => "last_updated",
             ListColumn::Notes => "notes",
+            ListColumn::NewEpisodes => "new_episodes",
+            ListColumn::NextAiring => "next_airing",
         }
     }
 
+    /// What the Sort menu offers, most useful first.
+    pub const SORTS: [ListColumn; 8] = [
+        ListColumn::NewEpisodes,
+        ListColumn::NextAiring,
+        ListColumn::Title,
+        ListColumn::Progress,
+        ListColumn::Score,
+        ListColumn::Average,
+        ListColumn::Season,
+        ListColumn::LastUpdated,
+    ];
+
     pub fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|c| c.key() == key)
+        Self::ALL
+            .into_iter()
+            .chain([ListColumn::NewEpisodes, ListColumn::NextAiring])
+            .find(|c| c.key() == key)
+    }
+
+    /// Whether larger values come first when this sort is picked, so that
+    /// "New episodes" shows the most behind first and "Score" the best.
+    pub fn descending_by_default(self) -> bool {
+        matches!(
+            self,
+            ListColumn::NewEpisodes
+                | ListColumn::Score
+                | ListColumn::Average
+                | ListColumn::LastUpdated
+                | ListColumn::Season
+        )
     }
 }
 
@@ -188,7 +228,16 @@ pub fn sort_rows(state: &AppState, rows: &mut [AnimeId], sort: Sort) {
         let by_key = |key: Option<SortKey>| {
             key.map_or(Ordering::Equal, |key| {
                 let ordering = compare(state, &titles, key.column, *a, *b);
-                if key.descending {
+                // An anime with no next episode stays last either way.
+                let unknown_time = |id: &AnimeId| {
+                    state
+                        .anime
+                        .get(id)
+                        .is_none_or(|x| x.next_episode_time.is_none())
+                };
+                let keep =
+                    key.column == ListColumn::NextAiring && unknown_time(a) != unknown_time(b);
+                if key.descending && !keep {
                     ordering.reverse()
                 } else {
                     ordering
@@ -238,9 +287,98 @@ fn compare(
         ListColumn::Type => anime_a
             .map(|x| x.kind as u8)
             .cmp(&anime_b.map(|x| x.kind as u8)),
+        ListColumn::NewEpisodes => {
+            let new = |id| new_episodes(state.anime.get(id), state.entries.get(id));
+            new(&a).cmp(&new(&b))
+        }
+        // Unknown times go last whichever way the sort runs, since "no next
+        // episode" is not "soonest" or "latest".
+        ListColumn::NextAiring => {
+            let time = |anime: Option<&Anime>| anime.and_then(|x| x.next_episode_time);
+            match (time(anime_a), time(anime_b)) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            }
+        }
         ListColumn::Season => anime_a
             .map(|x| Season::from_date(x.date_started))
             .cmp(&anime_b.map(|x| Season::from_date(x.date_started))),
+    }
+}
+
+/// Aired episodes the user has not watched yet. Only Watching entries
+/// count, and only when the service says how many have aired, so a show the
+/// user dropped or has not started never nags.
+pub fn new_episodes(anime: Option<&Anime>, entry: Option<&ListEntry>) -> u32 {
+    match (anime, entry) {
+        (Some(anime), Some(entry))
+            if entry.status == ListStatus::Watching && is_in_list(Some(entry)) =>
+        {
+            let aired = match anime.episode_count {
+                // A finished count caps a stale aired number.
+                Some(count) if anime.last_aired_episode > count => count,
+                _ => anime.last_aired_episode,
+            };
+            aired.saturating_sub(entry.watched_episodes)
+        }
+        _ => 0,
+    }
+}
+
+/// The quick filters under the list heading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Chip {
+    #[default]
+    All,
+    NewEpisodes,
+    Airing,
+    FinishedAiring,
+}
+
+impl Chip {
+    pub const ALL: [Chip; 4] = [
+        Chip::All,
+        Chip::NewEpisodes,
+        Chip::Airing,
+        Chip::FinishedAiring,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Chip::All => "All",
+            Chip::NewEpisodes => "New episodes",
+            Chip::Airing => "Airing",
+            Chip::FinishedAiring => "Finished airing",
+        }
+    }
+
+    pub fn matches(self, state: &AppState, id: AnimeId, today_in_japan: Date) -> bool {
+        let anime = state.anime.get(&id);
+        match self {
+            Chip::All => true,
+            Chip::NewEpisodes => new_episodes(anime, state.entries.get(&id)) > 0,
+            Chip::Airing => {
+                anime.is_some_and(|a| airing_status(a, today_in_japan) == AiringStatus::Airing)
+            }
+            Chip::FinishedAiring => anime
+                .is_some_and(|a| airing_status(a, today_in_japan) == AiringStatus::FinishedAiring),
+        }
+    }
+}
+
+/// When the next episode airs, in words: `today 18:30`, `tomorrow 01:00`,
+/// `in 3 days`. Days are counted by local calendar date, not 24 hour steps,
+/// so 23:00 tonight is "today" and 01:00 is "tomorrow".
+pub fn airing_label(time: Timestamp, now: Timestamp, tz: &TimeZone) -> String {
+    let when = time.to_zoned(tz.clone());
+    let days = (when.date() - now.to_zoned(tz.clone()).date()).get_days();
+    match days {
+        ..0 => "aired".to_owned(),
+        0 => format!("today {}", when.strftime("%H:%M")),
+        1 => format!("tomorrow {}", when.strftime("%H:%M")),
+        n => format!("in {n} days"),
     }
 }
 
@@ -408,6 +546,79 @@ mod tests {
         // Equal scores fall back to the title: Alpha before bravo.
         let rows = list_rows(&state, None, "", by_score);
         assert_eq!(rows, [AnimeId(3), AnimeId(2), AnimeId(1), AnimeId(4)]);
+    }
+
+    #[test]
+    fn new_episodes_count_only_watching() {
+        let mut anime = Anime::new(AnimeId(1));
+        anime.last_aired_episode = 6;
+        let mut entry = ListEntry::new(AnimeId(1));
+        entry.status = ListStatus::Watching;
+        entry.watched_episodes = 3;
+        assert_eq!(new_episodes(Some(&anime), Some(&entry)), 3);
+        // A stale aired count never goes past the episode count.
+        anime.episode_count = Some(4);
+        assert_eq!(new_episodes(Some(&anime), Some(&entry)), 1);
+        entry.status = ListStatus::OnHold;
+        assert_eq!(new_episodes(Some(&anime), Some(&entry)), 0);
+        entry.status = ListStatus::Watching;
+        anime.last_aired_episode = 0;
+        assert_eq!(new_episodes(Some(&anime), Some(&entry)), 0);
+    }
+
+    #[test]
+    fn sorts_by_new_episodes_and_next_airing() {
+        let mut state = state();
+        let time = |s: &str| Some(s.parse::<Timestamp>().unwrap());
+        let mut set = |id: u32, aired: u32, next: Option<Timestamp>| {
+            let mut anime = state.anime[&AnimeId(id)].clone();
+            anime.last_aired_episode = aired;
+            anime.next_episode_time = next;
+            state.store_anime(vec![anime]).unwrap();
+        };
+        // Entries start at 0 watched; 3 is Completed and never counts.
+        set(1, 2, time("2026-11-14T10:00:00Z"));
+        set(2, 0, None);
+        set(4, 5, time("2026-11-13T10:00:00Z"));
+        let by = |column, descending| Sort {
+            primary: Some(SortKey { column, descending }),
+            secondary: None,
+        };
+        let rows = list_rows(
+            &state,
+            Some(ListStatus::Watching),
+            "",
+            by(ListColumn::NewEpisodes, true),
+        );
+        assert_eq!(rows, [AnimeId(4), AnimeId(1), AnimeId(2)]);
+        // Unknown times last in both directions.
+        let rows = list_rows(
+            &state,
+            Some(ListStatus::Watching),
+            "",
+            by(ListColumn::NextAiring, false),
+        );
+        assert_eq!(rows, [AnimeId(4), AnimeId(1), AnimeId(2)]);
+        let rows = list_rows(
+            &state,
+            Some(ListStatus::Watching),
+            "",
+            by(ListColumn::NextAiring, true),
+        );
+        assert_eq!(rows, [AnimeId(1), AnimeId(4), AnimeId(2)]);
+        let today = jiff::civil::date(2026, 11, 12);
+        assert!(Chip::NewEpisodes.matches(&state, AnimeId(4), today));
+        assert!(!Chip::NewEpisodes.matches(&state, AnimeId(2), today));
+    }
+
+    #[test]
+    fn airing_labels_count_calendar_days() {
+        let tz = TimeZone::fixed(jiff::tz::offset(2));
+        let now: Timestamp = "2026-11-12T20:00:00Z".parse().unwrap(); // 22:00 local
+        let at = |s: &str| airing_label(s.parse().unwrap(), now, &tz);
+        assert_eq!(at("2026-11-12T21:30:00Z"), "today 23:30");
+        assert_eq!(at("2026-11-12T23:00:00Z"), "tomorrow 01:00");
+        assert_eq!(at("2026-11-15T12:00:00Z"), "in 3 days");
     }
 
     #[test]

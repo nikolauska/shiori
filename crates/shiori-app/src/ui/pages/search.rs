@@ -11,10 +11,10 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::select::{Select, SelectEvent, SelectState};
 use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use shiori_core::{AiringStatus, AnimeId, AnimeType, SearchParams, Season, SeasonName};
-use shiori_store::{SearchFilters, ViewMode};
+use shiori_store::SearchFilters;
 use shiori_sync::PageToken;
 
-use crate::ui::anime_view::{AnimeView, Place};
+use crate::ui::anime_view::{self, AnimeView, Place};
 use crate::ui::format;
 use crate::ui::model::Model;
 use crate::ui::widgets::Choice;
@@ -262,10 +262,6 @@ impl SearchPage {
 impl Render for SearchPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.results.len();
-        let (icon, tooltip) = match self.view.read(cx).mode() {
-            ViewMode::List => (IconName::LayoutDashboard, "Show as cards"),
-            ViewMode::Cards => (IconName::Menu, "Show as a list"),
-        };
         let more = self.next.is_some() && !self.params.is_season_browse();
         v_flex()
             .size_full()
@@ -282,15 +278,8 @@ impl Render for SearchPage {
                             .child(format!("{count} anime")),
                     )
                     .child(div().flex_1())
-                    .child(
-                        Button::new("view-mode")
-                            .icon(icon)
-                            .ghost()
-                            .tooltip(tooltip)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.view.update(cx, |view, cx| view.toggle_mode(cx))
-                            })),
-                    ),
+                    .child(anime_view::sort_menu(&self.view, cx))
+                    .child(anime_view::mode_switcher(&self.view, cx)),
             )
             .child(
                 h_flex()

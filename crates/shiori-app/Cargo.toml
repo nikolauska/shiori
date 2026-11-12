@@ -20,6 +20,7 @@ reqwest.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-kit-assets.workspace = true
+image.workspace = true
 gpui_platform.workspace = true
 jiff.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "sync"] }

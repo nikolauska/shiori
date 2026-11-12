@@ -45,9 +45,19 @@ pub struct Model {
     pub session: Session,
     /// A session write is scheduled.
     session_save: Option<Task<()>>,
+    /// The anime shown in the inspector.
+    pub selected: Option<AnimeId>,
 }
 
 impl EventEmitter<AppEvent> for Model {}
+
+/// Requests from views that the main window carries out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiRequest {
+    OpenAnime(AnimeId),
+}
+
+impl EventEmitter<UiRequest> for Model {}
 
 impl Model {
     pub fn new(startup: Startup) -> anyhow::Result<Self> {
@@ -75,6 +85,7 @@ impl Model {
             posters: Posters::default(),
             session,
             session_save: None,
+            selected: None,
         })
     }
 
@@ -174,6 +185,30 @@ impl Model {
         let result = self.startup.state.save_entry(entry, Timestamp::now());
         self.apply(result, cx);
         self.queue_settled(cx);
+    }
+
+    /// Marks one more or one less episode watched, within 0 and the episode
+    /// count. Only for anime in the list.
+    pub fn step_episode(&mut self, id: AnimeId, delta: i32, cx: &mut Context<Self>) {
+        let state = self.state();
+        let Some(mut entry) = state
+            .entries
+            .get(&id)
+            .filter(|e| shiori_core::entry::is_in_list(Some(e)))
+            .cloned()
+        else {
+            return;
+        };
+        let max = state
+            .anime
+            .get(&id)
+            .and_then(|a| a.episode_count)
+            .unwrap_or(shiori_core::anime::MAX_EPISODE_COUNT);
+        let watched = entry.watched_episodes.saturating_add_signed(delta).min(max);
+        if watched != entry.watched_episodes {
+            entry.watched_episodes = watched;
+            self.save_entry(entry, cx);
+        }
     }
 
     pub fn remove_entry(&mut self, id: AnimeId, cx: &mut Context<Self>) {
@@ -436,11 +471,42 @@ impl Model {
         }
     }
 
-    pub fn set_details_splitter(&mut self, width: Option<f32>, cx: &mut Context<Self>) {
-        if width.is_some() && self.session.details_splitter != width {
-            self.session.details_splitter = width;
+    pub fn set_inspector_width(&mut self, width: f32, cx: &mut Context<Self>) {
+        if self.session.inspector_width != Some(width) {
+            self.session.inspector_width = Some(width);
             self.session_changed(cx);
         }
+    }
+
+    pub fn set_inspector_hidden(&mut self, hidden: bool, cx: &mut Context<Self>) {
+        if self.session.inspector_hidden != hidden {
+            self.session.inspector_hidden = hidden;
+            self.session_changed(cx);
+            cx.notify();
+        }
+    }
+
+    // ---- Selection ----------------------------------------------------------
+
+    /// The anime the inspector shows.
+    pub fn select(&mut self, id: AnimeId, cx: &mut Context<Self>) {
+        if self.selected != Some(id) {
+            self.selected = Some(id);
+            cx.notify();
+        }
+    }
+
+    pub fn deselect(&mut self, cx: &mut Context<Self>) {
+        if self.selected.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Asks the main window to show an anime: in the inspector, or as a full
+    /// page when the inspector is hidden or the window is narrow.
+    pub fn open_anime(&mut self, id: AnimeId, cx: &mut Context<Self>) {
+        self.select(id, cx);
+        cx.emit(UiRequest::OpenAnime(id));
     }
 
     // ---- Synchronize --------------------------------------------------------
