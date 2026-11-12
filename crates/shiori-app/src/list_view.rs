@@ -2,7 +2,7 @@
 //! apart from the views so the rules can be tested without a window.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use shiori_core::date::Season;
 use shiori_core::entry::is_in_list;
@@ -103,6 +103,30 @@ impl Sort {
             self.secondary = self.primary;
         }
         self.primary = Some(key);
+    }
+}
+
+impl Sort {
+    /// The sort remembered in `session.toml`. Unknown column names give no
+    /// sort, so an old or edited file cannot break the list.
+    pub fn from_session(view: &shiori_store::ListView) -> Self {
+        let key = |column: &str, descending| {
+            ListColumn::from_key(column).map(|column| SortKey { column, descending })
+        };
+        Self {
+            primary: key(&view.sort_column, view.sort_descending),
+            secondary: key(&view.second_sort_column, view.second_sort_descending),
+        }
+    }
+
+    pub fn to_session(self, view: &mut shiori_store::ListView) {
+        let parts = |key: Option<SortKey>| {
+            key.map_or((String::new(), false), |k| {
+                (k.column.key().to_owned(), k.descending)
+            })
+        };
+        (view.sort_column, view.sort_descending) = parts(self.primary);
+        (view.second_sort_column, view.second_sort_descending) = parts(self.secondary);
     }
 }
 
@@ -209,6 +233,87 @@ fn compare(
     }
 }
 
+/// The selected rows of a list or card view, kept by anime id so that a
+/// re-sort or a sync does not move the selection to other anime.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    pub ids: BTreeSet<AnimeId>,
+    /// Where a Shift click range starts.
+    anchor: Option<AnimeId>,
+}
+
+impl Selection {
+    pub fn contains(&self, id: AnimeId) -> bool {
+        self.ids.contains(&id)
+    }
+
+    /// A click on `rows[ix]`: alone it selects only that row, with Ctrl it
+    /// toggles the row, with Shift it selects from the last clicked row.
+    pub fn click(&mut self, rows: &[AnimeId], ix: usize, toggle: bool, range: bool) {
+        let Some(&id) = rows.get(ix) else {
+            return;
+        };
+        let anchor = self.anchor.and_then(|a| rows.iter().position(|r| *r == a));
+        match (range, anchor) {
+            (true, Some(start)) => {
+                let (from, to) = (start.min(ix), start.max(ix));
+                if !toggle {
+                    self.ids.clear();
+                }
+                self.ids.extend(&rows[from..=to]);
+                // The anchor stays, so the next Shift click grows or shrinks
+                // the same range.
+                return;
+            }
+            _ if toggle => {
+                if !self.ids.remove(&id) {
+                    self.ids.insert(id);
+                }
+            }
+            _ => {
+                self.ids.clear();
+                self.ids.insert(id);
+            }
+        }
+        self.anchor = Some(id);
+    }
+
+    /// Selects `id` alone unless it is already part of the selection, as a
+    /// right click does before opening the menu.
+    pub fn select_for_menu(&mut self, id: AnimeId) {
+        if !self.ids.contains(&id) {
+            self.ids.clear();
+            self.ids.insert(id);
+            self.anchor = Some(id);
+        }
+    }
+
+    pub fn invert(&mut self, rows: &[AnimeId]) {
+        self.ids = rows
+            .iter()
+            .copied()
+            .filter(|id| !self.ids.contains(id))
+            .collect();
+    }
+
+    /// Drops anime that are no longer shown.
+    pub fn retain(&mut self, rows: &[AnimeId]) {
+        let shown: BTreeSet<AnimeId> = rows.iter().copied().collect();
+        self.ids.retain(|id| shown.contains(id));
+        if self.anchor.is_some_and(|a| !shown.contains(&a)) {
+            self.anchor = None;
+        }
+    }
+
+    /// The selected anime in the order they are shown.
+    pub fn in_order(&self, rows: &[AnimeId]) -> Vec<AnimeId> {
+        rows.iter()
+            .copied()
+            .filter(|id| self.ids.contains(id))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +397,53 @@ mod tests {
         // Equal scores fall back to the title: Alpha before bravo.
         let rows = list_rows(&state, None, "", by_score);
         assert_eq!(rows, [AnimeId(3), AnimeId(2), AnimeId(1), AnimeId(4)]);
+    }
+
+    #[test]
+    fn sort_round_trips_through_the_session() {
+        let mut sort = Sort::default();
+        sort.by(SortKey {
+            column: ListColumn::Score,
+            descending: true,
+        });
+        sort.by(SortKey {
+            column: ListColumn::LastUpdated,
+            descending: false,
+        });
+        let mut view = shiori_store::ListView::default();
+        sort.to_session(&mut view);
+        assert_eq!(view.sort_column, "last_updated");
+        assert_eq!(Sort::from_session(&view), sort);
+        view.sort_column = "nonsense".into();
+        assert_eq!(Sort::from_session(&view).primary, None);
+    }
+
+    #[test]
+    fn selection_follows_clicks() {
+        let rows: Vec<AnimeId> = (1..=6).map(AnimeId).collect();
+        let mut selection = Selection::default();
+        selection.click(&rows, 1, false, false);
+        assert_eq!(selection.in_order(&rows), [AnimeId(2)]);
+        // Shift selects from the last clicked row, either way.
+        selection.click(&rows, 4, false, true);
+        assert_eq!(selection.in_order(&rows), rows[1..=4]);
+        selection.click(&rows, 0, false, true);
+        assert_eq!(selection.in_order(&rows), rows[0..=1]);
+        // Ctrl toggles one row and keeps the rest.
+        selection.click(&rows, 5, true, false);
+        selection.click(&rows, 0, true, false);
+        assert_eq!(selection.in_order(&rows), [AnimeId(2), AnimeId(6)]);
+        selection.invert(&rows);
+        assert_eq!(
+            selection.in_order(&rows),
+            [AnimeId(1), AnimeId(3), AnimeId(4), AnimeId(5)]
+        );
+        // A right click inside the selection keeps it; outside replaces it.
+        selection.select_for_menu(AnimeId(3));
+        assert_eq!(selection.ids.len(), 4);
+        selection.select_for_menu(AnimeId(6));
+        assert_eq!(selection.in_order(&rows), [AnimeId(6)]);
+        selection.retain(&rows[..3]);
+        assert!(selection.ids.is_empty());
     }
 }

@@ -16,6 +16,7 @@ shiori-store.workspace = true
 shiori-sync.workspace = true
 shiori-library.workspace = true
 anyhow.workspace = true
+reqwest.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true
@@ -26,3 +27,6 @@ tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

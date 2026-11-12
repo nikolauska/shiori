@@ -1,8 +1,9 @@
 //! How values are written in the UI. Every user-visible string the views
 //! build goes through here or `text`, so translations can be added later.
 
+use shiori_core::anime::airing_status;
 use shiori_core::date::Season;
-use shiori_core::{Anime, AnimeType, FuzzyDate, ListEntry, ListStatus, SeasonName};
+use shiori_core::{AiringStatus, Anime, AnimeType, FuzzyDate, ListEntry, ListStatus, SeasonName};
 use shiori_sync::anilist::score::{ScoreFormat, format_rating};
 
 use shiori_app::list_view::ListColumn;
@@ -29,6 +30,72 @@ pub fn type_label(kind: AnimeType) -> &'static str {
         AnimeType::Ona => "ONA",
         AnimeType::Music => "Music",
     }
+}
+
+/// Today's date in Japan, where airing dates are given. Japan has no
+/// daylight saving time, so a fixed offset is exact and needs no time zone
+/// database.
+pub fn today_in_japan() -> jiff::civil::Date {
+    jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::fixed(jiff::tz::offset(9)))
+        .date()
+}
+
+pub fn airing_label(anime: &Anime, today_in_japan: jiff::civil::Date) -> &'static str {
+    match airing_status(anime, today_in_japan) {
+        AiringStatus::FinishedAiring => "Finished airing",
+        AiringStatus::Airing => "Currently airing",
+        AiringStatus::NotYetAired => "Not yet aired",
+        AiringStatus::Unknown => "",
+    }
+}
+
+/// A synopsis as plain text. Services send some HTML: line breaks become
+/// new lines, other tags are dropped, and the common entities are decoded.
+pub fn plain_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find('<') {
+        out.push_str(&rest[..start]);
+        let Some(end) = rest[start..].find('>') else {
+            // A lone "<" is text, not a tag.
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let tag = rest[start + 1..start + end].trim().to_ascii_lowercase();
+        if tag.starts_with("br") || tag == "/p" {
+            out.push('\n');
+        }
+        rest = &rest[start + end + 1..];
+    }
+    out.push_str(rest);
+    let out = out
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .replace("&mdash;", "—")
+        .replace("&ndash;", "–")
+        .replace("&amp;", "&");
+    // AniList often sends "<br>\n", which would leave blank lines doubled.
+    let mut text = String::with_capacity(out.len());
+    let mut newlines = 0;
+    for c in out.trim().chars() {
+        if c == '\n' {
+            newlines += 1;
+            if newlines > 2 {
+                continue;
+            }
+        } else {
+            newlines = 0;
+        }
+        text.push(c);
+    }
+    text
 }
 
 pub fn season_label(date: FuzzyDate) -> String {
@@ -116,5 +183,20 @@ pub fn cell(
             .map(|e| e.last_updated.strftime("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_default(),
         ListColumn::Notes => entry.map(|e| e.notes.clone()).unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synopsis_html_becomes_text() {
+        let html = "A <i>story</i> of &quot;Tom &amp; Jerry&quot;.<br>\n<br>\n(Source: AniList)";
+        assert_eq!(
+            plain_text(html),
+            "A story of \"Tom & Jerry\".\n\n(Source: AniList)"
+        );
+        assert_eq!(plain_text("1 < 2"), "1 < 2");
     }
 }

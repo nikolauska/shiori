@@ -1,10 +1,14 @@
 //! The gpui front end.
 
 mod actions;
+mod anime_view;
+mod details;
 mod format;
 mod main_window;
 mod model;
 mod pages;
+mod poster;
+mod widgets;
 
 use anyhow::Result;
 use gpui::{App, AppContext as _, Bounds, KeyBinding, WindowBounds, WindowOptions, px, size};
@@ -26,6 +30,7 @@ pub fn run(startup: Startup) -> Result<()> {
             KeyBinding::new("alt-left", GoBack, None),
             KeyBinding::new("alt-right", GoForward, None),
             KeyBinding::new("ctrl-q", Quit, None),
+            KeyBinding::new("enter", anime_view::OpenSelected, Some("AnimeView")),
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
 

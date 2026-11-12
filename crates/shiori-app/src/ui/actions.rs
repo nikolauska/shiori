@@ -1,6 +1,5 @@
-//! The edit actions offered on an anime: from the context menu now, from
-//! the details window later. Each builds a changed entry and saves it
-//! through the model.
+//! The actions offered on the selected anime through the context menu. Each
+//! edit builds a changed entry and saves it through the model.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -15,204 +14,284 @@ use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::{WindowExt as _, h_flex};
 use shiori_core::anime::MAX_EPISODE_COUNT;
 use shiori_core::entry::is_in_list;
-use shiori_core::{AnimeId, FuzzyDate, ListEntry, ListStatus};
+use shiori_core::{Anime, AnimeId, FuzzyDate, ListEntry, ListStatus};
 use shiori_sync::anilist::score::rating_list;
 
-use super::format;
 use super::model::Model;
+use super::{details, format};
 
 /// A menu item's action.
-type Handler = dyn Fn(&mut Window, &mut App);
+pub type Handler = dyn Fn(&mut Window, &mut App);
 
 /// Changes one entry. A missing entry starts as a new one.
-fn edit(model: &Entity<Model>, id: AnimeId, cx: &mut App, change: impl FnOnce(&mut ListEntry)) {
+fn edit(model: &Entity<Model>, id: AnimeId, cx: &mut App, change: impl Fn(&mut ListEntry)) {
+    edit_all(model, &[id], cx, |entry, _| change(entry));
+}
+
+/// Changes several entries the same way. The anime is passed along for
+/// edits that depend on it, such as "set to date started airing".
+fn edit_all(
+    model: &Entity<Model>,
+    ids: &[AnimeId],
+    cx: &mut App,
+    change: impl Fn(&mut ListEntry, Option<&Anime>),
+) {
     model.update(cx, |model, cx| {
-        let mut entry = model
-            .state()
-            .entries
-            .get(&id)
-            .filter(|e| !e.pending_delete)
-            .cloned()
-            .unwrap_or_else(|| ListEntry::new(id));
-        change(&mut entry);
-        model.save_entry(entry, cx);
+        for &id in ids {
+            let state = model.state();
+            let mut entry = state
+                .entries
+                .get(&id)
+                .filter(|e| !e.pending_delete)
+                .cloned()
+                .unwrap_or_else(|| ListEntry::new(id));
+            change(&mut entry, state.anime.get(&id));
+            model.save_entry(entry, cx);
+        }
     });
 }
 
-/// Builds the context menu for an anime in a list.
+/// A web search address for an anime title.
+fn web_search_url(title: &str) -> String {
+    let mut query = String::new();
+    for byte in title.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                query.push(byte as char)
+            }
+            b' ' => query.push('+'),
+            _ => query.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    format!("https://duckduckgo.com/?q={query}")
+}
+
+/// Builds the context menu for the selected anime. `ids` is never empty;
+/// items that act on one anime use the first. `invert` is the list's
+/// "Invert selection", when the menu belongs to a list.
 pub fn context_menu(
     model: &Entity<Model>,
-    id: AnimeId,
+    ids: Vec<AnimeId>,
+    invert: Option<Rc<Handler>>,
     menu: PopupMenu,
     window: &mut Window,
     cx: &mut App,
 ) -> PopupMenu {
+    let Some(&id) = ids.first() else {
+        return menu;
+    };
     let state = model.read(cx).state();
+    let single = ids.len() == 1;
+    let in_list: Vec<AnimeId> = ids
+        .iter()
+        .copied()
+        .filter(|id| is_in_list(state.entries.get(id)))
+        .collect();
     let entry = state.entries.get(&id).cloned();
-    let in_list = is_in_list(entry.as_ref());
-    let anime = state.anime.get(&id).cloned();
-    let title = state.title(id);
+    let episodes = state.anime.get(&id).and_then(|a| a.episode_count);
+    let titles: Vec<String> = ids.iter().map(|&id| state.title(id)).collect();
     let ratings = rating_list(format::score_format(state));
+    // Check marks only make sense when every selected entry agrees.
+    let current = |value: fn(&ListEntry) -> u8| {
+        let mut values = in_list
+            .iter()
+            .filter_map(|id| state.entries.get(id))
+            .map(value);
+        let first = values.next();
+        first.filter(|f| values.all(|v| v == *f))
+    };
+    let current_score = current(|e| e.score);
+    let current_status = current(|e| e.status as u8);
 
     let item = |label: &str, f: Rc<Handler>| {
         PopupMenuItem::new(label.to_owned()).on_click(move |_, window, cx| f(window, cx))
     };
     let m = model.clone();
 
-    let mut menu = menu.item(item(
-        "Links",
-        Rc::new(move |_, cx| cx.open_url(&format!("https://anilist.co/anime/{id}"))),
-    ));
+    let mut menu = menu
+        .item(item(
+            "Details",
+            Rc::new({
+                let m = m.clone();
+                move |window, cx| details::open(&m, id, window, cx)
+            }),
+        ))
+        .item(item(
+            "Links",
+            Rc::new(move |_, cx| cx.open_url(&format!("https://anilist.co/anime/{id}"))),
+        ))
+        .item(PopupMenuItem::submenu(
+            "Search",
+            PopupMenu::build(window, cx, {
+                let title = titles[0].clone();
+                move |sub, _, _| {
+                    let title = title.clone();
+                    sub.item(
+                        PopupMenuItem::new("Torrents and other links")
+                            .on_click(move |_, _, cx| cx.open_url(&web_search_url(&title))),
+                    )
+                }
+            }),
+        ));
 
-    if !in_list {
+    let not_in_list: Vec<AnimeId> = ids
+        .iter()
+        .copied()
+        .filter(|i| !in_list.contains(i))
+        .collect();
+    if !not_in_list.is_empty() {
         let m = m.clone();
         let add = PopupMenu::build(window, cx, move |mut sub, _, _| {
             for status in ListStatus::SHOWN {
                 let m = m.clone();
-                sub = sub.item(
-                    PopupMenuItem::new(format::status_label(status))
-                        .on_click(move |_, _, cx| edit(&m, id, cx, |e| e.status = status)),
-                );
+                let ids = not_in_list.clone();
+                sub = sub
+                    .item(PopupMenuItem::new(format::status_label(status)).on_click(
+                        move |_, _, cx| edit_all(&m, &ids, cx, |e, _| e.status = status),
+                    ));
             }
             sub
         });
         menu = menu
             .separator()
             .item(PopupMenuItem::submenu("Add to list", add));
-    } else {
-        let entry = entry.clone().unwrap_or_else(|| ListEntry::new(id));
-        let anime_for_dates = anime.clone();
+    }
+    if !in_list.is_empty() {
         let m2 = m.clone();
-        let edit_menu = PopupMenu::build(window, cx, move |mut sub, window, cx| {
-            let m = m2.clone();
-            let episodes = anime_for_dates.as_ref().and_then(|a| a.episode_count);
-            sub = sub.item(PopupMenuItem::new("Episode...").on_click({
-                let m = m.clone();
-                let watched = entry.watched_episodes;
-                move |_, window, cx| ask_episode(&m, id, watched, episodes, window, cx)
-            }));
-
-            let score = PopupMenu::build(window, cx, {
-                let m = m.clone();
-                let ratings = ratings.clone();
-                let current = entry.score;
-                move |mut sub, _, _| {
-                    for rating in &ratings {
+        let ids = in_list.clone();
+        let edit_menu =
+            PopupMenu::build(window, cx, move |mut sub, window, cx| {
+                let m = m2.clone();
+                if single {
+                    let watched = entry.as_ref().map_or(0, |e| e.watched_episodes);
+                    sub = sub.item(PopupMenuItem::new("Episode...").on_click({
                         let m = m.clone();
-                        let value = rating.value;
-                        sub = sub.item(
-                            PopupMenuItem::new(rating.label.clone())
-                                .checked(value == current)
-                                .on_click(move |_, _, cx| edit(&m, id, cx, |e| e.score = value)),
-                        );
-                    }
-                    sub
+                        move |_, window, cx| ask_episode(&m, id, watched, episodes, window, cx)
+                    }));
                 }
-            });
-            sub = sub.item(PopupMenuItem::submenu("Score", score));
 
-            let status = PopupMenu::build(window, cx, {
-                let m = m.clone();
-                let current = entry.status;
-                move |mut sub, _, _| {
-                    for status in ListStatus::SHOWN {
-                        let m = m.clone();
-                        sub = sub.item(
-                            PopupMenuItem::new(format::status_label(status))
-                                .checked(status == current)
-                                .on_click(move |_, _, cx| edit(&m, id, cx, |e| e.status = status)),
-                        );
+                let score = PopupMenu::build(window, cx, {
+                    let m = m.clone();
+                    let ratings = ratings.clone();
+                    let ids = ids.clone();
+                    move |mut sub, _, _| {
+                        for rating in &ratings {
+                            let m = m.clone();
+                            let ids = ids.clone();
+                            let value = rating.value;
+                            sub = sub.item(
+                                PopupMenuItem::new(rating.label.clone())
+                                    .checked(Some(value) == current_score)
+                                    .on_click(move |_, _, cx| {
+                                        edit_all(&m, &ids, cx, |e, _| e.score = value)
+                                    }),
+                            );
+                        }
+                        sub
                     }
-                    sub
-                }
-            });
-            sub = sub.item(PopupMenuItem::submenu("Status", status));
+                });
+                sub = sub.item(PopupMenuItem::submenu("Score", score));
 
-            let started = anime_for_dates
-                .as_ref()
-                .map(|a| a.date_started)
-                .unwrap_or_default();
-            let finished = anime_for_dates
-                .as_ref()
-                .map(|a| a.date_finished)
-                .unwrap_or_default();
-            let updated = FuzzyDate::from(
-                entry
-                    .last_updated
-                    .to_zoned(jiff::tz::TimeZone::system())
-                    .date(),
-            );
-            sub = sub.item(PopupMenuItem::submenu(
-                "Date started",
-                date_menu(
-                    &m,
-                    id,
-                    "Set to date started airing",
-                    started,
-                    updated,
-                    false,
-                    window,
-                    cx,
-                ),
-            ));
-            sub = sub.item(PopupMenuItem::submenu(
-                "Date completed",
-                date_menu(
-                    &m,
-                    id,
-                    "Set to date finished airing",
-                    finished,
-                    updated,
-                    true,
-                    window,
-                    cx,
-                ),
-            ));
-            sub.item(PopupMenuItem::new("Notes...").on_click({
-                let notes = entry.notes.clone();
-                move |_, window, cx| ask_notes(&m, id, notes.clone(), window, cx)
-            }))
-        });
+                let status = PopupMenu::build(window, cx, {
+                    let m = m.clone();
+                    let ids = ids.clone();
+                    move |mut sub, _, _| {
+                        for status in ListStatus::SHOWN {
+                            let m = m.clone();
+                            let ids = ids.clone();
+                            sub = sub.item(
+                                PopupMenuItem::new(format::status_label(status))
+                                    .checked(Some(status as u8) == current_status)
+                                    .on_click(move |_, _, cx| {
+                                        edit_all(&m, &ids, cx, |e, _| e.status = status)
+                                    }),
+                            );
+                        }
+                        sub
+                    }
+                });
+                sub = sub.item(PopupMenuItem::submenu("Status", status));
+                sub = sub.item(PopupMenuItem::submenu(
+                    "Date started",
+                    date_menu(&m, ids.clone(), false, window, cx),
+                ));
+                sub = sub.item(PopupMenuItem::submenu(
+                    "Date completed",
+                    date_menu(&m, ids.clone(), true, window, cx),
+                ));
+                if single {
+                    let notes = entry.as_ref().map(|e| e.notes.clone()).unwrap_or_default();
+                    sub = sub.item(PopupMenuItem::new("Notes...").on_click(
+                        move |_, window, cx| ask_notes(&m, id, notes.clone(), window, cx),
+                    ));
+                }
+                sub
+            });
         let m = m.clone();
-        let remove_title = title.clone();
+        let remove_ids = in_list.clone();
+        let remove_titles = titles.join("\n");
         menu = menu
             .separator()
             .item(PopupMenuItem::submenu("Edit", edit_menu))
             .item(item(
                 "Remove...",
-                Rc::new(move |window, cx| confirm_remove(&m, id, &remove_title, window, cx)),
+                Rc::new(move |window, cx| {
+                    confirm_remove(&m, remove_ids.clone(), &remove_titles, window, cx)
+                }),
             ));
     }
 
     let m = model.clone();
-    menu.separator()
-        .item(item(
-            "Copy title",
-            Rc::new(move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(title.clone()))),
+    let refresh_ids = ids.clone();
+    let copied = titles.join("\n");
+    menu = menu
+        .separator()
+        .item(PopupMenuItem::submenu(
+            "Copy",
+            PopupMenu::build(window, cx, move |sub, _, _| {
+                let copied = copied.clone();
+                sub.item(PopupMenuItem::new("Title").on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()))
+                }))
+            }),
         ))
         .item(item(
             "Refresh",
-            Rc::new(move |_, cx| m.update(cx, |model, cx| model.refresh_anime(id, cx))),
-        ))
+            Rc::new(move |_, cx| {
+                m.update(cx, |model, cx| {
+                    for &id in &refresh_ids {
+                        model.refresh_anime(id, cx);
+                    }
+                })
+            }),
+        ));
+    if let Some(invert) = invert {
+        menu = menu.separator().item(item("Invert selection", invert));
+    }
+    menu
 }
 
-#[allow(clippy::too_many_arguments)]
 fn date_menu(
     model: &Entity<Model>,
-    id: AnimeId,
-    airing_label: &'static str,
-    airing: FuzzyDate,
-    updated: FuzzyDate,
+    ids: Vec<AnimeId>,
     completed: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<PopupMenu> {
     let model = model.clone();
+    let airing_label = if completed {
+        "Set to date finished airing"
+    } else {
+        "Set to date started airing"
+    };
     PopupMenu::build(window, cx, move |sub, _, _| {
-        let set = move |date: FuzzyDate| {
+        // Which date to set, worked out per entry.
+        let set = |pick: fn(&ListEntry, Option<&Anime>) -> FuzzyDate| {
             let model = model.clone();
+            let ids = ids.clone();
             move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
-                edit(&model, id, cx, |e| {
+                edit_all(&model, &ids, cx, |e, anime| {
+                    let date = pick(e, anime);
                     if completed {
                         e.date_completed = date;
                     } else {
@@ -221,13 +300,18 @@ fn date_menu(
                 });
             }
         };
-        sub.item(PopupMenuItem::new("Clear").on_click(set(FuzzyDate::default())))
+        let airing = if completed {
+            set(|_, anime| anime.map(|a| a.date_finished).unwrap_or_default())
+        } else {
+            set(|_, anime| anime.map(|a| a.date_started).unwrap_or_default())
+        };
+        sub.item(PopupMenuItem::new("Clear").on_click(set(|_, _| FuzzyDate::default())))
+            .item(PopupMenuItem::new(airing_label).on_click(airing))
             .item(
-                PopupMenuItem::new(airing_label)
-                    .disabled(airing.is_empty())
-                    .on_click(set(airing)),
+                PopupMenuItem::new("Set to last updated").on_click(set(|e, _| {
+                    FuzzyDate::from(e.last_updated.to_zoned(jiff::tz::TimeZone::system()).date())
+                })),
             )
-            .item(PopupMenuItem::new("Set to last updated").on_click(set(updated)))
     })
 }
 
@@ -313,21 +397,44 @@ fn ask_notes(model: &Entity<Model>, id: AnimeId, notes: String, window: &mut Win
 
 fn confirm_remove(
     model: &Entity<Model>,
-    id: AnimeId,
-    title: &str,
+    ids: Vec<AnimeId>,
+    titles: &str,
     window: &mut Window,
     cx: &mut App,
 ) {
     let model = model.clone();
-    let title = title.to_owned();
+    confirm(
+        "Do you want to remove selected items from your list?",
+        titles.to_owned(),
+        window,
+        cx,
+        move |cx| {
+            model.update(cx, |model, cx| {
+                for &id in &ids {
+                    model.remove_entry(id, cx);
+                }
+            })
+        },
+    );
+}
+
+/// Asks a yes or no question; `on_ok` runs on yes.
+pub fn confirm(
+    title: &'static str,
+    description: String,
+    window: &mut Window,
+    cx: &mut App,
+    on_ok: impl Fn(&mut App) + 'static,
+) {
+    let on_ok = Rc::new(on_ok);
     window.open_alert_dialog(cx, move |alert, _, _| {
-        let model = model.clone();
+        let on_ok = on_ok.clone();
         alert
             .confirm()
-            .title("Do you want to remove selected items from your list?")
-            .description(title.clone())
+            .title(title)
+            .description(description.clone())
             .on_ok(move |_, _, cx| {
-                model.update(cx, |model, cx| model.remove_entry(id, cx));
+                on_ok(cx);
                 true
             })
     });

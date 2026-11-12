@@ -5,18 +5,23 @@
 //! `AppState` there, so the state is never shared across threads.
 
 use std::future::Future;
+use std::time::Duration;
 
-use gpui::{Context, EventEmitter, SharedString};
+use gpui::{Context, EventEmitter, SharedString, Task};
 use jiff::Timestamp;
-use shiori_core::{AnimeId, ListEntry};
-use shiori_store::SecretKey;
+use shiori_core::{AnimeId, AnimeSettings, ListEntry, SearchParams};
+use shiori_store::{SecretKey, Session};
 use shiori_sync::anilist::AniList;
 use shiori_sync::queue::{Request, Step};
 use shiori_sync::sync::{SyncAction, SyncState, should_auto_process, sync_action};
-use shiori_sync::{Account, Service, ServiceError};
+use shiori_sync::{Account, PageToken, Service, ServiceError};
 
+use shiori_app::posters;
 use shiori_app::startup::Context as Startup;
 use shiori_app::state::{AppEvent, AppState};
+
+use super::format;
+use super::poster::Posters;
 
 /// What the status bar shows.
 #[derive(Debug, Clone, Default)]
@@ -31,9 +36,15 @@ pub struct Model {
     pub startup: Startup,
     service: AniList,
     runtime: tokio::runtime::Runtime,
+    /// For downloads that are not service requests, such as posters.
+    http: reqwest::Client,
     pub status: Status,
     /// Synchronize is running; a second click waits for it.
     syncing: bool,
+    pub posters: Posters,
+    pub session: Session,
+    /// A session write is scheduled.
+    session_save: Option<Task<()>>,
 }
 
 impl EventEmitter<AppEvent> for Model {}
@@ -48,12 +59,22 @@ impl Model {
             .thread_name("shiori-network")
             .enable_all()
             .build()?;
+        let http = startup.network()?.client()?;
+        // Losing the session loses nothing important; start from defaults.
+        let session = Session::load(&startup.folders.session_file()).unwrap_or_else(|error| {
+            tracing::warn!("Could not read the session: {error:#}");
+            Session::default()
+        });
         Ok(Self {
             startup,
             service,
             runtime,
+            http,
             status: Status::default(),
             syncing: false,
+            posters: Posters::default(),
+            session,
+            session_save: None,
         })
     }
 
@@ -174,6 +195,34 @@ impl Model {
         }
     }
 
+    pub fn save_anime_settings(&mut self, settings: AnimeSettings, cx: &mut Context<Self>) {
+        let result = self.startup.state.save_anime_settings(settings);
+        self.apply(result, cx);
+    }
+
+    // ---- History and queue ------------------------------------------------
+
+    pub fn remove_history(&mut self, id: i64, cx: &mut Context<Self>) {
+        let result = self.startup.state.remove_history(id);
+        self.apply(result, cx);
+    }
+
+    pub fn clear_history(&mut self, cx: &mut Context<Self>) {
+        let result = self.startup.state.clear_history();
+        self.apply(result, cx);
+    }
+
+    pub fn clear_queue(&mut self, cx: &mut Context<Self>) {
+        // Synchronize may be between two requests, with none in flight; a
+        // cleared queue would then end it halfway without a word.
+        if self.syncing {
+            self.set_error("Wait for synchronization to finish.", cx);
+            return;
+        }
+        let result = self.startup.state.clear_queue();
+        self.apply(result, cx);
+    }
+
     /// Fetches the anime again. "Not found" means the service removed it.
     pub fn refresh_anime(&mut self, id: AnimeId, cx: &mut Context<Self>) {
         let service = self.service.clone();
@@ -187,6 +236,7 @@ impl Model {
                     let result = this.startup.state.store_anime(vec![anime]);
                     this.apply(result, cx);
                     this.set_status(format!("Refreshed {title}."), cx);
+                    this.load_poster(id, true, cx);
                 }
                 Err(ServiceError::NotFound) => {
                     let result = this.startup.state.invalidate_anime(id);
@@ -195,6 +245,138 @@ impl Model {
                 Err(error) => this.service_error(error, cx),
             },
         );
+    }
+
+    // ---- Search -------------------------------------------------------------
+
+    /// Runs one search page. Found anime are stored like any other anime, so
+    /// that the views and the details window can show them. `done` gets the
+    /// ids in the service's order and the next page, or `None` on failure.
+    pub fn search(
+        &mut self,
+        params: SearchParams,
+        page: Option<PageToken>,
+        cx: &mut Context<Self>,
+        done: impl FnOnce(Option<(Vec<AnimeId>, Option<PageToken>)>, &mut gpui::App) + 'static,
+    ) {
+        let service = self.service.clone();
+        self.set_status("Searching...", cx);
+        self.request(
+            async move { service.search(&params, page).await },
+            cx,
+            move |this, result, cx| match result {
+                Ok(page) => {
+                    let ids: Vec<AnimeId> = page.anime.iter().map(|a| a.id).collect();
+                    let result = this.startup.state.store_anime(page.anime);
+                    this.apply(result, cx);
+                    this.set_status(format!("Found {} anime.", ids.len()), cx);
+                    done(Some((ids, page.next)), cx);
+                }
+                Err(error) => {
+                    this.service_error(error, cx);
+                    done(None, cx);
+                }
+            },
+        );
+    }
+
+    // ---- Posters ------------------------------------------------------------
+
+    /// Reads the cached poster, or downloads it when it is missing,
+    /// outdated, or `force` is set.
+    pub fn load_poster(&mut self, id: AnimeId, force: bool, cx: &mut Context<Self>) {
+        let Some(anime) = self.state().anime.get(&id).cloned() else {
+            return;
+        };
+        if !self.posters.pending.insert(id) {
+            return;
+        }
+        let folder = self.startup.folders.poster_folder(self.state().service);
+        let client = self.http.clone();
+        let today = format::today_in_japan();
+        let task = self.runtime.spawn(async move {
+            let cached = posters::cached_file(&folder, id);
+            let written = cached
+                .as_ref()
+                .and_then(|path| path.metadata().ok()?.modified().ok())
+                .and_then(|time| jiff::Timestamp::try_from(time).ok());
+            let fresh = written.is_some_and(|written| {
+                !posters::is_outdated(&anime, written, jiff::Timestamp::now(), today)
+            });
+            if (fresh && !force) || anime.image_url.is_empty() {
+                if let Some(path) = &cached {
+                    return std::fs::read(path).map_err(|e| e.to_string());
+                }
+                return Err("no image address".to_owned());
+            }
+            let download = async {
+                let response = client.get(&anime.image_url).send().await?;
+                response.error_for_status()?.bytes().await
+            };
+            match download.await {
+                Ok(bytes) => {
+                    posters::store(&folder, id, &bytes).map_err(|e| e.to_string())?;
+                    Ok(bytes.to_vec())
+                }
+                // An old poster is better than none.
+                Err(error) => match &cached {
+                    Some(path) => std::fs::read(path).map_err(|e| e.to_string()),
+                    None => Err(error.to_string()),
+                },
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.posters.pending.remove(&id);
+                match result {
+                    Ok(Ok(bytes)) => {
+                        this.posters.remove(id);
+                        this.posters.insert(id, bytes);
+                    }
+                    Ok(Err(error)) => {
+                        tracing::debug!("No poster for {id}: {error}");
+                        this.posters.failed.insert(id);
+                    }
+                    Err(error) => {
+                        tracing::error!("Poster task failed: {error}");
+                        this.posters.failed.insert(id);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    // ---- Session ------------------------------------------------------------
+
+    /// Writes the session soon, at most once per second however often it
+    /// changes, since dragging a divider changes it on every frame.
+    pub fn session_changed(&mut self, cx: &mut Context<Self>) {
+        if self.session_save.is_some() {
+            return;
+        }
+        self.session_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let _ = this.update(cx, |this, _| {
+                this.session_save = None;
+                this.save_session();
+            });
+        }));
+    }
+
+    pub fn save_session(&mut self) {
+        if let Err(error) = self.session.save(&self.startup.folders.session_file()) {
+            tracing::error!("Could not save the session: {error:#}");
+        }
+    }
+
+    pub fn set_details_splitter(&mut self, width: Option<f32>, cx: &mut Context<Self>) {
+        if width.is_some() && self.session.details_splitter != width {
+            self.session.details_splitter = width;
+            self.session_changed(cx);
+        }
     }
 
     // ---- Synchronize --------------------------------------------------------

@@ -24,6 +24,8 @@ pub enum AppEvent {
     EntryUpdated(AnimeId),
     EntryDeleted(AnimeId),
     QueueChanged,
+    HistoryChanged,
+    AnimeSettingsUpdated(AnimeId),
     QueueProcessing(AnimeId),
     QueuedWhileSignedOut(AnimeId),
     AuthenticationChanged(bool),
@@ -283,6 +285,46 @@ impl AppState {
         Ok(out)
     }
 
+    /// Removes one history item. The list entry is left as it is.
+    pub fn remove_history(&mut self, id: i64) -> Result<Vec<AppEvent>> {
+        self.db.delete_history(id)?;
+        self.history.retain(|item| item.id != id);
+        Ok(vec![AppEvent::HistoryChanged])
+    }
+
+    pub fn clear_history(&mut self) -> Result<Vec<AppEvent>> {
+        self.db.clear_history()?;
+        self.history.clear();
+        Ok(vec![AppEvent::HistoryChanged])
+    }
+
+    /// Drops every unsent change. Local entries keep their edited values
+    /// until the next list fetch replaces them with the service's.
+    pub fn clear_queue(&mut self) -> Result<Vec<AppEvent>> {
+        // The answer to a request in flight would find no item to finish.
+        if self.queue.in_flight().is_some() {
+            anyhow::bail!("the queue is being sent");
+        }
+        self.db.clear_queue()?;
+        self.queue.clear();
+        Ok(vec![AppEvent::QueueChanged])
+    }
+
+    /// Stores per-anime settings and updates the title index, since the
+    /// user's synonyms are used for recognition.
+    pub fn save_anime_settings(&mut self, settings: AnimeSettings) -> Result<Vec<AppEvent>> {
+        let id = settings.id;
+        if self.anime_settings.get(&id) == Some(&settings) {
+            return Ok(Vec::new());
+        }
+        self.db.upsert_anime_settings(&settings)?;
+        self.anime_settings.insert(id, settings);
+        if let Some(anime) = self.anime.get(&id) {
+            self.title_index.update(anime, self.anime_settings.get(&id));
+        }
+        Ok(vec![AppEvent::AnimeSettingsUpdated(id)])
+    }
+
     /// What is in the database, to check that changes were written through.
     #[cfg(test)]
     pub fn stored(&self) -> shiori_store::Loaded {
@@ -307,5 +349,82 @@ impl AppState {
             events.push(AppEvent::EntryUpdated(id));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use shiori_store::{Accounts, Database, Settings};
+
+    use super::*;
+
+    fn state() -> AppState {
+        AppState::new(
+            Database::open_in_memory().unwrap(),
+            Settings::default(),
+            Accounts::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn history_items_are_removed_and_cleared() {
+        let mut state = state();
+        state.store_anime(vec![Anime::new(AnimeId(1))]).unwrap();
+        for episode in 1..=3 {
+            let id = state
+                .db
+                .add_history(AnimeId(1), episode, Timestamp::UNIX_EPOCH)
+                .unwrap();
+            state.history.push(HistoryItem {
+                id,
+                anime_id: AnimeId(1),
+                episode,
+                time: Timestamp::UNIX_EPOCH,
+            });
+        }
+        let second = state.history[1].id;
+        state.remove_history(second).unwrap();
+        let episodes: Vec<u32> = state.stored().history.iter().map(|h| h.episode).collect();
+        assert_eq!(episodes, [1, 3]);
+        assert_eq!(state.history.len(), 2);
+        state.clear_history().unwrap();
+        assert!(state.history.is_empty());
+        assert!(state.stored().history.is_empty());
+    }
+
+    #[test]
+    fn clearing_the_queue_keeps_the_entry() {
+        let mut state = state();
+        state.store_anime(vec![Anime::new(AnimeId(1))]).unwrap();
+        let mut entry = ListEntry::new(AnimeId(1));
+        entry.watched_episodes = 2;
+        state.save_entry(entry, Timestamp::UNIX_EPOCH).unwrap();
+        assert!(state.queue.contains(AnimeId(1)));
+        state.clear_queue().unwrap();
+        assert!(state.queue.is_empty());
+        assert!(state.stored().queue.is_empty());
+        assert_eq!(state.entries[&AnimeId(1)].watched_episodes, 2);
+    }
+
+    #[test]
+    fn anime_settings_update_recognition() {
+        let mut state = state();
+        let mut anime = Anime::new(AnimeId(1));
+        anime.titles.romaji = "Sousou no Frieren".into();
+        state.store_anime(vec![anime]).unwrap();
+        let settings = AnimeSettings {
+            id: AnimeId(1),
+            display_title: "Frieren".into(),
+            synonyms: vec!["Frieren Beyond".into()],
+            ..AnimeSettings::default()
+        };
+        let events = state.save_anime_settings(settings.clone()).unwrap();
+        assert_eq!(events, [AppEvent::AnimeSettingsUpdated(AnimeId(1))]);
+        assert_eq!(state.title(AnimeId(1)), "Frieren");
+        assert_eq!(state.title_index.lookup("Frieren Beyond")[0].0, AnimeId(1));
+        assert_eq!(state.stored().anime_settings[&AnimeId(1)], settings);
+        // Saving the same settings again changes nothing.
+        assert!(state.save_anime_settings(settings).unwrap().is_empty());
     }
 }
