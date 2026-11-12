@@ -20,12 +20,17 @@ use shiori_sync::{AccountInfo, FetchedList, SavedEntry, ServiceError, SyncQueue}
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppEvent {
     AnimeUpdated(AnimeId),
-    AnimeDeleted { id: AnimeId, title: String },
+    AnimeDeleted {
+        id: AnimeId,
+        title: String,
+    },
     EntryUpdated(AnimeId),
     EntryDeleted(AnimeId),
     QueueChanged,
     HistoryChanged,
     AnimeSettingsUpdated(AnimeId),
+    /// The user changed settings; titles and their order may differ.
+    SettingsChanged,
     QueueProcessing(AnimeId),
     QueuedWhileSignedOut(AnimeId),
     AuthenticationChanged(bool),

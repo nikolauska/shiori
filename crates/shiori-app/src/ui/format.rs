@@ -3,22 +3,13 @@
 
 use shiori_core::anime::airing_status;
 use shiori_core::date::Season;
-use shiori_core::{AiringStatus, Anime, AnimeType, FuzzyDate, ListEntry, ListStatus, SeasonName};
+use shiori_core::{AiringStatus, Anime, AnimeType, FuzzyDate, ListEntry, SeasonName};
 use shiori_sync::anilist::score::{ScoreFormat, format_rating};
 
 use shiori_app::list_view::ListColumn;
 use shiori_app::state::AppState;
 
-pub fn status_label(status: ListStatus) -> &'static str {
-    match status {
-        ListStatus::Watching => "Watching",
-        ListStatus::Completed => "Completed",
-        ListStatus::OnHold => "On hold",
-        ListStatus::Dropped => "Dropped",
-        ListStatus::PlanToWatch => "Plan to watch",
-        ListStatus::NotInList => "Not in list",
-    }
-}
+pub use shiori_app::list_view::status_label;
 
 pub fn type_label(kind: AnimeType) -> &'static str {
     match kind {

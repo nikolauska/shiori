@@ -5,9 +5,9 @@
 //! as Taiga does, so the user never has to close a pile of them.
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, Global, IntoElement, ParentElement,
-    PathPromptOptions, Render, SharedString, Styled, Subscription, Window, WindowBounds,
-    WindowHandle, WindowOptions, div, prelude::*, px, size,
+    AnyElement, App, AppContext as _, Context, Entity, Global, IntoElement, ParentElement,
+    PathPromptOptions, Render, SharedString, Styled, Subscription, Window, WindowHandle,
+    WindowOptions, div, prelude::*, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
@@ -52,17 +52,13 @@ pub fn open(model: &Entity<Model>, id: AnimeId, _: &mut Window, cx: &mut App) {
         }
     }
 
-    let session = model.read(cx).session.details_window;
-    let window_size = size(
-        px(session.width.unwrap_or(900) as f32),
-        px(session.height.unwrap_or(640) as f32),
-    );
+    let geometry = model.read(cx).session.details_window;
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            window_size,
+        window_bounds: Some(super::window_bounds(
+            &geometry,
+            size(px(900.), px(640.)),
             cx,
-        ))),
+        )),
         ..WindowOptions::default()
     };
     let model_for_window = model.clone();
@@ -147,7 +143,18 @@ impl DetailsView {
             .collect();
         let status = cx.new(|cx| SelectState::new(status_choices(), None, window, cx));
         let score = cx.new(|cx| SelectState::new(ratings, None, window, cx));
-        let subscriptions = vec![cx.subscribe_in(&model, window, Self::on_event)];
+        let subscriptions = vec![
+            cx.subscribe_in(&model, window, Self::on_event),
+            cx.observe_window_bounds(window, |this, window, cx| {
+                let geometry = super::geometry_of(window);
+                this.model.update(cx, |model, cx| {
+                    if model.session.details_window != geometry {
+                        model.session.details_window = geometry;
+                        model.session_changed(cx);
+                    }
+                });
+            }),
+        ];
         let mut view = Self {
             id,
             tab: 0,

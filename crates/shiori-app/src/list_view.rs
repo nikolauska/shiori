@@ -10,6 +10,17 @@ use shiori_core::{Anime, AnimeId, ListEntry, ListStatus};
 
 use crate::state::AppState;
 
+pub fn status_label(status: ListStatus) -> &'static str {
+    match status {
+        ListStatus::Watching => "Watching",
+        ListStatus::Completed => "Completed",
+        ListStatus::OnHold => "On hold",
+        ListStatus::Dropped => "Dropped",
+        ListStatus::PlanToWatch => "Plan to watch",
+        ListStatus::NotInList => "Not in list",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ListColumn {
     Title,

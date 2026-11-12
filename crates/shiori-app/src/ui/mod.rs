@@ -11,15 +11,19 @@ mod poster;
 mod widgets;
 
 use anyhow::Result;
-use gpui::{App, AppContext as _, Bounds, KeyBinding, WindowBounds, WindowOptions, px, size};
-use gpui_component::{Root, Theme};
+use gpui::{
+    App, AppContext as _, Bounds, KeyBinding, Pixels, Size, Window, WindowBounds, WindowOptions,
+    point, px, size,
+};
+use gpui_component::{Root, Theme, ThemeMode};
+use shiori_store::{ColorScheme, WindowGeometry};
 
 use shiori_app::startup::Context as Startup;
 
 use main_window::MainWindow;
 use model::Model;
 
-gpui::actions!(shiori, [Synchronize, GoBack, GoForward, Quit]);
+gpui::actions!(shiori, [Synchronize, GoBack, GoForward, About, Quit]);
 
 pub fn run(startup: Startup) -> Result<()> {
     let model = Model::new(startup)?;
@@ -30,19 +34,28 @@ pub fn run(startup: Startup) -> Result<()> {
             KeyBinding::new("alt-left", GoBack, None),
             KeyBinding::new("alt-right", GoForward, None),
             KeyBinding::new("ctrl-q", Quit, None),
+            KeyBinding::new("f1", About, None),
             KeyBinding::new("enter", anime_view::OpenSelected, Some("AnimeView")),
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
 
         let model = cx.new(|_| model);
-        let bounds = Bounds::centered(None, size(px(1200.), px(760.)), cx);
+        // The session is also written on quit, in case a change is still
+        // waiting for its one second delay.
+        model.update(cx, |_, cx| {
+            cx.on_app_quit(|model, _| {
+                model.save_session();
+                async {}
+            })
+            .detach();
+        });
+        let geometry = model.read(cx).session.main_window;
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_bounds: Some(window_bounds(&geometry, size(px(1200.), px(760.)), cx)),
             ..WindowOptions::default()
         };
         let opened = cx.open_window(options, |window, cx| {
-            // Follow the system's light or dark setting.
-            Theme::sync_system_appearance(Some(window), cx);
+            apply_color_scheme(model.read(cx).state().settings.color_scheme, window, cx);
             window.set_window_title("Shiori");
             let view = cx.new(|cx| MainWindow::new(model.clone(), window, cx));
             cx.new(|cx| Root::new(view, window, cx))
@@ -60,4 +73,57 @@ pub fn run(startup: Startup) -> Result<()> {
         });
     });
     Ok(())
+}
+
+/// Light, dark, or whatever the system uses.
+pub fn apply_color_scheme(scheme: ColorScheme, window: &mut gpui::Window, cx: &mut App) {
+    match scheme {
+        ColorScheme::System => Theme::sync_system_appearance(Some(window), cx),
+        ColorScheme::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+        ColorScheme::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+    }
+}
+
+/// Where to open a window, from its remembered geometry. A remembered
+/// position is used only while it is still on a screen, since the monitor it
+/// was on may be gone.
+pub fn window_bounds(geometry: &WindowGeometry, default: Size<Pixels>, cx: &App) -> WindowBounds {
+    let window_size = match (geometry.width, geometry.height) {
+        (Some(w), Some(h)) if w >= 200 && h >= 150 => size(px(w as f32), px(h as f32)),
+        _ => default,
+    };
+    let origin = geometry
+        .x
+        .zip(geometry.y)
+        .map(|(x, y)| point(px(x as f32), px(y as f32)))
+        .filter(|origin| {
+            cx.displays()
+                .iter()
+                .any(|display| display.bounds().contains(origin))
+        });
+    let bounds = match origin {
+        Some(origin) => Bounds::new(origin, window_size),
+        None => Bounds::centered(None, window_size, cx),
+    };
+    if geometry.maximized {
+        WindowBounds::Maximized(bounds)
+    } else {
+        WindowBounds::Windowed(bounds)
+    }
+}
+
+/// The geometry of a window, to remember. The size kept is the restore
+/// size, so a maximized window comes back to its old size when restored.
+pub fn geometry_of(window: &Window) -> WindowGeometry {
+    let (bounds, maximized) = match window.window_bounds() {
+        WindowBounds::Windowed(bounds) => (bounds, false),
+        WindowBounds::Maximized(bounds) | WindowBounds::Fullscreen(bounds) => (bounds, true),
+    };
+    WindowGeometry {
+        x: Some(f32::from(bounds.origin.x) as i32),
+        y: Some(f32::from(bounds.origin.y) as i32),
+        width: Some(f32::from(bounds.size.width) as u32),
+        height: Some(f32::from(bounds.size.height) as u32),
+        maximized,
+    }
 }

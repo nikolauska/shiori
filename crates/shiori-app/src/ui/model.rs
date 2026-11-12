@@ -10,7 +10,7 @@ use std::time::Duration;
 use gpui::{Context, EventEmitter, SharedString, Task};
 use jiff::Timestamp;
 use shiori_core::{AnimeId, AnimeSettings, ListEntry, SearchParams};
-use shiori_store::{SecretKey, Session};
+use shiori_store::{SecretKey, Session, Settings};
 use shiori_sync::anilist::AniList;
 use shiori_sync::queue::{Request, Step};
 use shiori_sync::sync::{SyncAction, SyncState, should_auto_process, sync_action};
@@ -245,6 +245,70 @@ impl Model {
                 Err(error) => this.service_error(error, cx),
             },
         );
+    }
+
+    // ---- Settings -----------------------------------------------------------
+
+    /// Stores changed settings and applies them. `proxy_password` is `None`
+    /// when the password was left as it was.
+    pub fn apply_settings(
+        &mut self,
+        settings: Settings,
+        proxy_password: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let before = self.state().settings.clone();
+        if let Err(error) = self.startup.settings_file.save(&settings) {
+            self.set_error(format!("Could not save settings: {error:#}"), cx);
+            return;
+        }
+        if let Some(password) = &proxy_password {
+            let result = if password.is_empty() {
+                self.startup.secrets.delete(SecretKey::ProxyPassword)
+            } else {
+                self.startup.secrets.set(SecretKey::ProxyPassword, password)
+            };
+            if let Err(error) = result {
+                self.set_error(format!("Could not store the proxy password: {error}"), cx);
+            }
+        }
+        let proxy_changed = before.proxy != settings.proxy || proxy_password.is_some();
+        self.startup.state.settings = settings;
+        // The HTTP clients are built with the proxy, so a new proxy needs new
+        // clients. Requests already running finish on the old ones.
+        if proxy_changed {
+            let clients = self
+                .startup
+                .service()
+                .and_then(|service| Ok((service, self.startup.network()?.client()?)));
+            match clients {
+                Ok((service, http)) => {
+                    self.service = service;
+                    self.http = http;
+                }
+                Err(error) => self.set_error(format!("Proxy settings: {error:#}"), cx),
+            }
+        }
+        self.emit(vec![AppEvent::SettingsChanged], cx);
+    }
+
+    /// Flips one on/off setting, such as "Enable synchronization".
+    pub fn toggle_setting(&mut self, flip: fn(&mut Settings), cx: &mut Context<Self>) {
+        let mut settings = self.state().settings.clone();
+        flip(&mut settings);
+        self.apply_settings(settings, None, cx);
+    }
+
+    /// Writes the list as Markdown and says how it went.
+    pub fn export_markdown(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        let text = shiori_app::export::markdown(self.state());
+        match std::fs::write(&path, text) {
+            Ok(()) => self.set_status(format!("Exported list to {}.", path.display()), cx),
+            Err(error) => {
+                tracing::error!("Could not export list to {}: {error}", path.display());
+                self.set_error(format!("Could not export list to {}.", path.display()), cx);
+            }
+        }
     }
 
     // ---- Search -------------------------------------------------------------

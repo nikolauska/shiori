@@ -6,14 +6,17 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
-use gpui_component::{ActiveTheme as _, Disableable as _, IconName, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, IconName, WindowExt as _, h_flex, v_flex,
+};
 use shiori_core::ListStatus;
 use shiori_core::entry::is_in_list;
 
 use super::model::Model;
 use super::pages::{self, Page};
-use super::{GoBack, GoForward, Synchronize};
+use super::{About, GoBack, GoForward, Synchronize};
 
 pub struct MainWindow {
     model: Entity<Model>,
@@ -40,6 +43,16 @@ impl MainWindow {
                 }
             }),
         ];
+        let mut subscriptions = subscriptions;
+        subscriptions.push(cx.observe_window_bounds(window, |this, window, cx| {
+            let geometry = super::geometry_of(window);
+            this.model.update(cx, |model, cx| {
+                if model.session.main_window != geometry {
+                    model.session.main_window = geometry;
+                    model.session_changed(cx);
+                }
+            });
+        }));
         let pages = pages::Pages::new(&model, window, cx);
         Self {
             model,
@@ -88,6 +101,88 @@ impl MainWindow {
         self.model.update(cx, |model, cx| model.synchronize(cx));
     }
 
+    fn about(&mut self, _: &About, window: &mut Window, cx: &mut Context<Self>) {
+        window.open_alert_dialog(cx, |alert, _, _| {
+            alert
+                .title(format!("Shiori {}", env!("CARGO_PKG_VERSION")))
+                .description(
+                    "An anime list manager derived from Taiga.\n\
+                     Licensed under the GNU General Public License, version 3 or later.\n\
+                     https://github.com/erengy/taiga",
+                )
+        });
+    }
+
+    fn export_markdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let path = cx.prompt_for_new_path(&home, Some("anime-list.md"));
+        let model = self.model.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(path))) = path.await {
+                model.update(cx, |model, cx| model.export_markdown(path, cx));
+            }
+        })
+        .detach();
+    }
+
+    fn menu(
+        model: Entity<Model>,
+        view: gpui::WeakEntity<Self>,
+        menu: PopupMenu,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
+        let settings = &model.read(cx).state().settings;
+        let (sync_on, detection_on) = (settings.sync_enabled, settings.detection_enabled);
+        let service = model.read(cx).service_name();
+        let m = model.clone();
+        let m2 = model.clone();
+        let m3 = model.clone();
+        let v1 = view.clone();
+        let v2 = view.clone();
+        menu.item(
+            PopupMenuItem::new(format!("Synchronize with {service}"))
+                .on_click(move |_, _, cx| m.update(cx, |model, cx| model.synchronize(cx))),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new("Enable synchronization")
+                .checked(sync_on)
+                .on_click(move |_, _, cx| {
+                    m2.update(cx, |model, cx| {
+                        model.toggle_setting(|s| s.sync_enabled = !s.sync_enabled, cx)
+                    })
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Enable detection")
+                .checked(detection_on)
+                .on_click(move |_, _, cx| {
+                    m3.update(cx, |model, cx| {
+                        model.toggle_setting(|s| s.detection_enabled = !s.detection_enabled, cx)
+                    })
+                }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new("Export anime list as Markdown...").on_click(
+                move |_, window, cx| {
+                    let _ = v1.update(cx, |this, cx| this.export_markdown(window, cx));
+                },
+            ),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new("Settings...")
+                .on_click(move |_, window, cx| pages::settings::open(&model, window, cx)),
+        )
+        .item(PopupMenuItem::new("About").on_click(move |_, window, cx| {
+            let _ = v2.update(cx, |this, cx| this.about(&About, window, cx));
+        }))
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let service = self.model.read(cx).service_name();
         h_flex()
@@ -126,12 +221,25 @@ impl MainWindow {
                         this.synchronize(&Synchronize, window, cx)
                     })),
             )
+            .child({
+                let view = cx.entity().downgrade();
+                let model = self.model.clone();
+                Button::new("menu")
+                    .icon(IconName::Menu)
+                    .ghost()
+                    .tooltip("Menu")
+                    .dropdown_menu(move |menu, _, cx| {
+                        Self::menu(model.clone(), view.clone(), menu, cx)
+                    })
+            })
             .child(
                 Button::new("settings")
                     .icon(IconName::Settings)
                     .ghost()
                     .tooltip("Settings")
-                    .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx))),
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        pages::settings::open(&this.model, window, cx)
+                    })),
             )
     }
 
@@ -203,6 +311,7 @@ impl Render for MainWindow {
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::go_forward))
             .on_action(cx.listener(Self::synchronize))
+            .on_action(cx.listener(Self::about))
             .child(self.render_toolbar(cx))
             .child(
                 h_flex()

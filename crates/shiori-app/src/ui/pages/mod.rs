@@ -3,7 +3,7 @@
 mod history;
 mod list;
 mod search;
-mod settings;
+pub mod settings;
 
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, IntoElement, ParentElement, Styled, Window, div,
@@ -18,7 +18,6 @@ pub use super::format::status_label;
 pub use history::HistoryPage;
 pub use list::ListPage;
 pub use search::SearchPage;
-pub use settings::SettingsPage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -28,14 +27,12 @@ pub enum Page {
     AnimeList(Option<ListStatus>),
     History,
     Library,
-    Settings,
 }
 
 pub struct Pages {
     pub list: Entity<ListPage>,
     pub history: Entity<HistoryPage>,
     pub search: Entity<SearchPage>,
-    pub settings: Entity<SettingsPage>,
 }
 
 impl Pages {
@@ -44,7 +41,6 @@ impl Pages {
             list: cx.new(|cx| ListPage::new(model.clone(), window, cx)),
             history: cx.new(|cx| HistoryPage::new(model.clone(), window, cx)),
             search: cx.new(|cx| SearchPage::new(model.clone(), window, cx)),
-            settings: cx.new(|cx| SettingsPage::new(model.clone(), window, cx)),
         }
     }
 
@@ -52,7 +48,6 @@ impl Pages {
         match page {
             Page::AnimeList(_) => self.list.clone().into_any_element(),
             Page::Search => self.search.clone().into_any_element(),
-            Page::Settings => self.settings.clone().into_any_element(),
             Page::Home => placeholder("Home", "What is playing now will show here.", cx),
             Page::History => self.history.clone().into_any_element(),
             Page::Library => placeholder("Library", "Library folders will show here.", cx),
