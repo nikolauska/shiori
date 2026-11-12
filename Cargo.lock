@@ -6684,6 +6684,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "windows 0.62.2",
 ]
 
 [[package]]
