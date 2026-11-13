@@ -116,7 +116,7 @@ impl Episode {
 }
 
 /// The video containers among the extensions the parser knows.
-const VIDEO_EXTENSIONS: [&str; 16] = [
+pub const VIDEO_EXTENSIONS: [&str; 16] = [
     "3gp", "avi", "divx", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpg", "ogm", "rm", "rmvb",
     "ts", "webm", "wmv",
 ];

@@ -37,7 +37,7 @@ pub struct Tracker {
     /// with these elements. Kept so that the next poll's identification
     /// does not undo the choice.
     manual: Option<(Vec<shiori_core::Element>, AnimeId)>,
-    relations: Relations,
+    pub(super) relations: Relations,
     pub players: Vec<Player>,
     detection: Option<detection::Handle>,
     /// The last pass's results, to match focus reports to the media.

@@ -20,7 +20,7 @@ From any anime you can play:
 | --- | --- |
 | Next episode | The one after your progress. If you have watched them all, episode 1. |
 | Last episode | The one you watched most recently |
-| Random episode | A random one among those you have seen, plus the next one. For a completed anime, any episode. Unwatched episodes further ahead are never picked, to avoid spoilers. |
+| Random episode | A random one among those you have seen, plus the next one, picked from the files in your library. For a completed anime, any episode. Unwatched episodes further ahead are never picked, to avoid spoilers. |
 | A specific episode | You enter the number |
 
 Shiori searches your library folders for a video file that it recognizes as that anime and that episode, and opens it with your default video player. A file containing several episodes counts for each of them.
@@ -37,7 +37,9 @@ Because the player then has the file open, Shiori detects it like any other play
 
 The library view shows your library folders as a tree. Next to each file you see the anime and episode Shiori recognizes it as, the file type, size and date. This is the quickest way to spot files that are not recognized.
 
-From there you can open a file, open the details of its anime, rename it, or delete it. Deleting asks first.
+From there you can open a file, open the details of its anime, rename it, or delete it. Deleting asks first and moves the file to the trash (the Recycle Bin on Windows), so it can be restored.
+
+Shiori reads the folders when you first open the library view, when you choose "Scan available episodes" and when you change your library folders. It does not read them at start-up.
 
 ## Files outside the library
 

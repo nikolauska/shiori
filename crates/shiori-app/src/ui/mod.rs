@@ -5,6 +5,7 @@ mod anime_view;
 mod format;
 mod icons;
 mod inspector;
+mod library;
 mod main_window;
 mod model;
 mod now_playing;
@@ -41,7 +42,9 @@ gpui::actions!(
         About,
         Quit,
         ToggleInspector,
-        FocusSearch
+        FocusSearch,
+        PlayNext,
+        PlayRandom
     ]
 );
 
@@ -70,6 +73,8 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
             KeyBinding::new("f1", About, None),
             KeyBinding::new("ctrl-k", FocusSearch, None),
             KeyBinding::new("ctrl-i", ToggleInspector, None),
+            KeyBinding::new("ctrl-n", PlayNext, None),
+            KeyBinding::new("ctrl-r", PlayRandom, None),
             KeyBinding::new("enter", anime_view::OpenSelected, Some("AnimeView")),
             // "+" is shift-= on most layouts; = alone is accepted too so the
             // key works without Shift.
@@ -77,6 +82,21 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
             KeyBinding::new("shift-=", anime_view::Increment, Some("AnimeView")),
             KeyBinding::new("=", anime_view::Increment, Some("AnimeView")),
             KeyBinding::new("-", anime_view::Decrement, Some("AnimeView")),
+            KeyBinding::new(
+                "enter",
+                pages::library::OpenItem,
+                Some(pages::library::CONTEXT),
+            ),
+            KeyBinding::new(
+                "f2",
+                pages::library::RenameItem,
+                Some(pages::library::CONTEXT),
+            ),
+            KeyBinding::new(
+                "delete",
+                pages::library::DeleteItem,
+                Some(pages::library::CONTEXT),
+            ),
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
 

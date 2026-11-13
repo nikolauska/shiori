@@ -26,6 +26,9 @@ gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-component = "=0.9.1"
 # The icons gpui-component draws; without them icon buttons are blank.
 gpui-kit-assets = "=0.9.1"
+# Picks the episode for "Random episode" and the anime for "Play random
+# anime"; already in the tree through gpui.
+fastrand = "2.5.0"
 # Decodes the app icon for the window and the tray; gpui uses it already.
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # The Linux display backends are opt-in features; without them gpui
@@ -52,6 +55,9 @@ tray-icon = { version = "0.24.2", default-features = false, features = ["gtk"] }
 # on Linux.
 notify-rust = { version = "4.17.0", default-features = false, features = ["z"] }
 tracing = "0.1.44"
+# Deleting from the Library page moves files to the trash or Recycle Bin,
+# so that a slip can be undone.
+trash = { version = "5.3.0", default-features = false, features = ["freedesktop", "coinit_apartmentthreaded"] }
 tracing-subscriber = "0.3.23"
 unicode-normalization = "0.1.26"
 unicode-properties = "0.1.5"

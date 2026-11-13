@@ -27,6 +27,7 @@ use shiori_sync::anilist::score::rating_list;
 use shiori_app::list_view::{airing_label, new_episodes};
 use shiori_app::state::AppEvent;
 
+use super::library::PlayChoice;
 use super::model::Model;
 use super::widgets::Choice;
 use super::{format, poster, style};
@@ -649,14 +650,27 @@ impl Inspector {
                 cx,
             ))
             .child(
-                h_flex().gap_2().px_4().pt_3().child(
-                    Button::new("anilist")
-                        .small()
-                        .label("Open on AniList")
-                        .on_click(move |_, _, cx| {
-                            cx.open_url(&format!("https://anilist.co/anime/{id}"))
-                        }),
-                ),
+                h_flex()
+                    .gap_2()
+                    .px_4()
+                    .pt_3()
+                    .child(
+                        Button::new("anilist")
+                            .small()
+                            .label("Open on AniList")
+                            .on_click(move |_, _, cx| {
+                                cx.open_url(&format!("https://anilist.co/anime/{id}"))
+                            }),
+                    )
+                    .child({
+                        let model = self.model.clone();
+                        Button::new("play-next")
+                            .small()
+                            .label("Play next")
+                            .on_click(move |_, _, cx| {
+                                model.update(cx, |model, cx| model.play(id, PlayChoice::Next, cx))
+                            })
+                    }),
             )
             .child(
                 div()

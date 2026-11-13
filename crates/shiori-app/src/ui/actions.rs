@@ -15,8 +15,10 @@ use gpui_component::{WindowExt as _, h_flex};
 use shiori_core::anime::MAX_EPISODE_COUNT;
 use shiori_core::entry::is_in_list;
 use shiori_core::{Anime, AnimeId, FuzzyDate, ListEntry, ListStatus};
+use shiori_library::{can_start_rewatch, last_episode, next_episode, random_episode_limit};
 use shiori_sync::anilist::score::rating_list;
 
+use super::library::PlayChoice;
 use super::model::Model;
 use super::tracker::Badge;
 use super::{format, inspector};
@@ -130,6 +132,18 @@ pub fn context_menu(
         menu
     };
     let mut menu = menu
+        .item(PopupMenuItem::submenu(
+            "Play",
+            play_menu(model, id, window, cx),
+        ))
+        .item(item(
+            "Open folder",
+            Rc::new({
+                let m = m.clone();
+                move |_, cx| m.update(cx, |model, cx| model.open_anime_folder(id, cx))
+            }),
+        ))
+        .separator()
         .item(item(
             "Links",
             Rc::new(move |_, cx| cx.open_url(&format!("https://anilist.co/anime/{id}"))),
@@ -285,6 +299,88 @@ pub fn context_menu(
     menu
 }
 
+/// Play ▸ for one anime (ui.md, "Context menu").
+fn play_menu(
+    model: &Entity<Model>,
+    id: AnimeId,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<PopupMenu> {
+    let state = model.read(cx).state();
+    let entry = state.entries.get(&id).filter(|e| !e.pending_delete);
+    let anime = state.anime.get(&id);
+    let next = next_episode(entry, anime);
+    let last = last_episode(entry);
+    let random = random_episode_limit(entry, anime).is_some();
+    let rewatch = can_start_rewatch(entry, anime, format::today_in_japan());
+    let count = anime.and_then(|a| a.episode_count);
+    let model = model.clone();
+    PopupMenu::build(window, cx, move |sub, _, _| {
+        let play = |choice: PlayChoice| {
+            let model = model.clone();
+            move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+                model.update(cx, |model, cx| model.play(id, choice, cx))
+            }
+        };
+        let mut sub = sub.item(
+            PopupMenuItem::new(format!("Next episode (#{next})")).on_click(play(PlayChoice::Next)),
+        );
+        if let Some(last) = last {
+            sub = sub.item(
+                PopupMenuItem::new(format!("Last episode (#{last})"))
+                    .on_click(play(PlayChoice::Last)),
+            );
+        }
+        if random {
+            sub = sub.item(PopupMenuItem::new("Random episode").on_click(play(PlayChoice::Random)));
+        }
+        let m = model.clone();
+        sub = sub.item(
+            PopupMenuItem::new("Episode...")
+                .on_click(move |_, window, cx| ask_play_episode(&m, id, next, count, window, cx)),
+        );
+        if rewatch {
+            let m = model.clone();
+            sub =
+                sub.separator()
+                    .item(
+                        PopupMenuItem::new("Start new rewatch").on_click(move |_, _, cx| {
+                            m.update(cx, |model, cx| model.start_rewatch(id, cx))
+                        }),
+                    );
+        }
+        sub
+    })
+}
+
+fn ask_play_episode(
+    model: &Entity<Model>,
+    id: AnimeId,
+    next: u32,
+    count: Option<u32>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let model = model.clone();
+    let max = count.filter(|&c| c > 0).unwrap_or(MAX_EPISODE_COUNT);
+    prompt(
+        "Play episode",
+        next.to_string(),
+        window,
+        cx,
+        move |text, window, cx| match text.trim().parse::<u32>() {
+            Ok(n) if (1..=max).contains(&n) => {
+                model.update(cx, |model, cx| model.play(id, PlayChoice::Episode(n), cx));
+                true
+            }
+            _ => {
+                window.push_notification(format!("Enter a number from 1 to {max}."), cx);
+                false
+            }
+        },
+    );
+}
+
 fn date_menu(
     model: &Entity<Model>,
     ids: Vec<AnimeId>,
@@ -330,7 +426,7 @@ fn date_menu(
 }
 
 /// A one-line text prompt with OK and Cancel.
-fn prompt(
+pub(crate) fn prompt(
     title: &'static str,
     value: String,
     window: &mut Window,

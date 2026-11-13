@@ -2,8 +2,8 @@
 //! status line (decision I22).
 
 use gpui::{
-    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, Render, SharedString,
-    Styled, Subscription, Window, div, img, prelude::*, px,
+    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, PathPromptOptions, Render,
+    SharedString, Styled, Subscription, Window, div, img, prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
@@ -22,7 +22,10 @@ use super::inspector::Inspector;
 use super::model::{Model, UiRequest};
 use super::now_playing;
 use super::pages::{self, Page};
-use super::{About, FocusSearch, GoBack, GoForward, Synchronize, ToggleInspector, style};
+use super::{
+    About, FocusSearch, GoBack, GoForward, PlayNext, PlayRandom, Synchronize, ToggleInspector,
+    style,
+};
 
 /// Below this window width the inspector does not fit beside the list, and
 /// an opened anime takes the whole page instead.
@@ -112,6 +115,10 @@ impl MainWindow {
     }
 
     fn show(&mut self, cx: &mut Context<Self>) {
+        if self.page == Page::Library {
+            self.model
+                .update(cx, |model, cx| model.scan_library_once(cx));
+        }
         if let Page::AnimeList(status) = self.page {
             self.pages
                 .list
@@ -166,6 +173,32 @@ impl MainWindow {
         self.model.update(cx, |model, cx| model.synchronize(cx));
     }
 
+    fn play_next(&mut self, _: &PlayNext, _: &mut Window, cx: &mut Context<Self>) {
+        self.model
+            .update(cx, |model, cx| model.play_selected_next(cx));
+    }
+
+    fn play_random(&mut self, _: &PlayRandom, _: &mut Window, cx: &mut Context<Self>) {
+        self.model
+            .update(cx, |model, cx| model.play_random_anime(cx));
+    }
+
+    fn add_library_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: true,
+            prompt: Some("Add folder".into()),
+        });
+        let model = self.model.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(paths))) = paths.await {
+                model.update(cx, |model, cx| model.add_library_folders(paths, cx));
+            }
+        })
+        .detach();
+    }
+
     fn about(&mut self, _: &About, window: &mut Window, cx: &mut Context<Self>) {
         window.open_alert_dialog(cx, |alert, _, _| {
             alert
@@ -212,6 +245,15 @@ impl MainWindow {
                 .on_click(move |_, _, cx| m.update(cx, |model, cx| model.synchronize(cx))),
         )
         .separator()
+        .item(PopupMenuItem::new("Play next episode").on_click({
+            let m = model.clone();
+            move |_, _, cx| m.update(cx, |model, cx| model.play_selected_next(cx))
+        }))
+        .item(PopupMenuItem::new("Play random anime").on_click({
+            let m = model.clone();
+            move |_, _, cx| m.update(cx, |model, cx| model.play_random_anime(cx))
+        }))
+        .separator()
         .item(
             PopupMenuItem::new("Enable synchronization")
                 .checked(sync_on)
@@ -230,6 +272,18 @@ impl MainWindow {
                     })
                 }),
         )
+        .separator()
+        .item({
+            let m = model.clone();
+            PopupMenuItem::new("Scan available episodes")
+                .on_click(move |_, _, cx| m.update(cx, |model, cx| model.scan_library(cx)))
+        })
+        .item({
+            let v = view.clone();
+            PopupMenuItem::new("Add new folder...").on_click(move |_, window, cx| {
+                let _ = v.update(cx, |this, cx| this.add_library_folder(window, cx));
+            })
+        })
         .separator()
         .item(
             PopupMenuItem::new("Export anime list as Markdown...").on_click(
@@ -551,6 +605,8 @@ impl Render for MainWindow {
             .on_action(cx.listener(Self::about))
             .on_action(cx.listener(Self::toggle_inspector))
             .on_action(cx.listener(Self::focus_search))
+            .on_action(cx.listener(Self::play_next))
+            .on_action(cx.listener(Self::play_random))
             .child(
                 h_flex()
                     .flex_1()
