@@ -20,10 +20,17 @@ pub enum AppIcon {
     CirclePause,
     CircleX,
     PanelRight,
+    Laptop,
+    Cloud,
+    CloudUpload,
+    Copy,
+    FilePlus,
+    LogIn,
+    ArrowRight,
 }
 
 impl AppIcon {
-    const FILES: [(&'static str, &'static [u8]); 10] = [
+    const FILES: [(&'static str, &'static [u8]); 17] = [
         (
             "app-icons/house.svg",
             include_bytes!("../../../../assets/icons/house.svg"),
@@ -63,6 +70,34 @@ impl AppIcon {
         (
             "app-icons/panel-right.svg",
             include_bytes!("../../../../assets/icons/panel-right.svg"),
+        ),
+        (
+            "app-icons/laptop.svg",
+            include_bytes!("../../../../assets/icons/laptop.svg"),
+        ),
+        (
+            "app-icons/cloud.svg",
+            include_bytes!("../../../../assets/icons/cloud.svg"),
+        ),
+        (
+            "app-icons/cloud-upload.svg",
+            include_bytes!("../../../../assets/icons/cloud-upload.svg"),
+        ),
+        (
+            "app-icons/copy.svg",
+            include_bytes!("../../../../assets/icons/copy.svg"),
+        ),
+        (
+            "app-icons/file-plus.svg",
+            include_bytes!("../../../../assets/icons/file-plus.svg"),
+        ),
+        (
+            "app-icons/log-in.svg",
+            include_bytes!("../../../../assets/icons/log-in.svg"),
+        ),
+        (
+            "app-icons/arrow-right.svg",
+            include_bytes!("../../../../assets/icons/arrow-right.svg"),
         ),
     ];
 }

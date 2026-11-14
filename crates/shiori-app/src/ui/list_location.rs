@@ -3,9 +3,15 @@
 
 use std::rc::Rc;
 
-use gpui::{App, Context, Entity, ParentElement as _, Styled as _, Window, div};
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    App, Context, Entity, InteractiveElement as _, IntoElement as _, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{WindowExt as _, h_flex};
+use gpui_component::{
+    ActiveTheme as _, Icon, IconName, StyledExt as _, WindowExt as _, h_flex, v_flex,
+};
 use std::path::PathBuf;
 
 use jiff::Timestamp;
@@ -18,6 +24,7 @@ use shiori_store::ListLocation;
 use shiori_sync::anilist::AniList;
 
 use super::format;
+use super::icons::AppIcon;
 use super::model::Model;
 use super::pages;
 
@@ -277,53 +284,143 @@ pub fn should_ask(model: &Model) -> bool {
 
 type Run = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// A dialog with a button per choice and Cancel. Each choice closes it.
-fn choose(
-    title: &'static str,
-    text: String,
-    choices: Vec<(&'static str, Run)>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    window.open_dialog(cx, move |dialog, _, _| {
-        let last = choices.len().saturating_sub(1);
-        let buttons = choices.iter().enumerate().map(|(ix, (label, run))| {
-            let run = run.clone();
-            Button::new(("choice", ix))
-                .label(*label)
-                .when_primary(ix == last)
+/// A number worth seeing before choosing, such as how many anime a list has.
+struct Stat {
+    icon: AppIcon,
+    value: String,
+    label: String,
+}
+
+/// One answer: an icon, a few words, and what choosing it does.
+struct Card {
+    icon: AppIcon,
+    title: String,
+    hint: String,
+    /// The suggested answer, drawn out.
+    primary: bool,
+    run: Run,
+}
+
+fn card(icon: AppIcon, title: &str, hint: impl Into<String>, primary: bool, run: Run) -> Card {
+    Card {
+        icon,
+        title: title.to_owned(),
+        hint: hint.into(),
+        primary,
+        run,
+    }
+}
+
+fn stat(icon: AppIcon, value: impl Into<String>, label: impl Into<String>) -> Stat {
+    Stat {
+        icon,
+        value: value.into(),
+        label: label.into(),
+    }
+}
+
+/// A question answered by clicking a card. Stats show what is at stake;
+/// two of them are joined by an arrow, as "from → to".
+fn ask(title: &'static str, stats: Vec<Stat>, cards: Vec<Card>, window: &mut Window, cx: &mut App) {
+    let stats = Rc::new(stats);
+    let cards = Rc::new(cards);
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let theme = cx.theme();
+        let (border, muted, muted_fg, primary) = (
+            theme.border,
+            theme.muted,
+            theme.muted_foreground,
+            theme.primary,
+        );
+        let tiles = stats.iter().enumerate().flat_map(|(ix, s)| {
+            let tile = v_flex()
+                .flex_1()
+                .items_center()
+                .gap_1()
+                .p_3()
+                .rounded_lg()
+                .bg(muted)
+                .child(Icon::new(s.icon).size_5().text_color(muted_fg))
+                .child(div().text_2xl().font_bold().child(s.value.clone()))
+                .child(div().text_xs().text_color(muted_fg).child(s.label.clone()))
+                .into_any_element();
+            let arrow = (ix > 0).then(|| {
+                Icon::new(AppIcon::ArrowRight)
+                    .size_5()
+                    .text_color(muted_fg)
+                    .into_any_element()
+            });
+            arrow.into_iter().chain([tile])
+        });
+        let choices = cards.iter().enumerate().map(|(ix, c)| {
+            let run = c.run.clone();
+            h_flex()
+                .id(("card", ix))
+                .gap_3()
+                .p_3()
+                .rounded_lg()
+                .border_1()
+                .border_color(if c.primary { primary } else { border })
+                .cursor_pointer()
+                .hover(|card| card.bg(muted))
+                .child(
+                    div()
+                        .size_10()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_md()
+                        .map(|tile| {
+                            if c.primary {
+                                tile.bg(primary).text_color(theme.primary_foreground)
+                            } else {
+                                tile.bg(muted).text_color(muted_fg)
+                            }
+                        })
+                        .child(Icon::new(c.icon).size_5()),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().font_semibold().child(c.title.clone()))
+                        .child(div().text_sm().text_color(muted_fg).child(c.hint.clone())),
+                )
+                .child(
+                    Icon::new(IconName::ChevronRight)
+                        .size_4()
+                        .text_color(muted_fg),
+                )
                 .on_click(move |_, window, cx| {
                     window.close_dialog(cx);
                     run(window, cx);
                 })
         });
-        dialog.title(title).child(div().child(text.clone())).footer(
-            h_flex()
-                .gap_2()
-                .justify_end()
-                .child(
+        dialog
+            .title(title)
+            .width(px(440.))
+            .child(
+                v_flex()
+                    .gap_4()
+                    .when(!stats.is_empty(), |body| {
+                        body.child(h_flex().gap_3().items_center().children(tiles))
+                    })
+                    .child(v_flex().gap_2().children(choices)),
+            )
+            .footer(
+                h_flex().justify_end().child(
                     Button::new("cancel")
+                        .ghost()
                         .label("Cancel")
                         .on_click(|_, window, cx| window.close_dialog(cx)),
-                )
-                .children(buttons),
-        )
+                ),
+            )
     });
-}
-
-trait WhenPrimary {
-    fn when_primary(self, primary: bool) -> Self;
-}
-
-impl WhenPrimary for Button {
-    fn when_primary(self, primary: bool) -> Self {
-        if primary { self.primary() } else { self }
-    }
 }
 
 /// The first-start question.
 pub fn ask_first(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
-    let service = model.read(cx).service_name();
     let account: Run = {
         let model = model.clone();
         Rc::new(move |window, cx| {
@@ -337,16 +434,37 @@ pub fn ask_first(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
         let model = model.clone();
         Rc::new(move |window, cx| to_local(&model, window, cx))
     };
-    choose(
+    ask(
         "Where should your list live?",
-        format!("Anime info comes from {service} either way. You can change this in Settings."),
+        Vec::new(),
         vec![
-            ("In my AniList account", account),
-            ("On this computer", local),
+            card(
+                AppIcon::Laptop,
+                "On this computer",
+                "No account needed",
+                true,
+                local,
+            ),
+            card(
+                AppIcon::Cloud,
+                "In my AniList account",
+                "Synced with AniList",
+                false,
+                account,
+            ),
         ],
         window,
         cx,
     );
+}
+
+fn list_count(model: &Model) -> usize {
+    model
+        .state()
+        .entries
+        .values()
+        .filter(|e| is_in_list(Some(e)))
+        .count()
 }
 
 /// Moves to this computer, asking first whether a new local list starts
@@ -354,13 +472,11 @@ pub fn ask_first(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
 fn to_local(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
     let (has_local, count, service) = {
         let model = model.read(cx);
-        let count = model
-            .state()
-            .entries
-            .values()
-            .filter(|e| is_in_list(Some(e)))
-            .count();
-        (model.startup.has_local_list(), count, model.service_name())
+        (
+            model.startup.has_local_list(),
+            list_count(model),
+            model.service_name(),
+        )
     };
     let start = move |copy: bool, model: &Entity<Model>| -> Run {
         let model = model.clone();
@@ -374,12 +490,28 @@ fn to_local(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
         start(false, model)(window, cx);
         return;
     }
-    choose(
+    ask(
         "Start your local list",
-        format!("Copy the {count} anime from your {service} list, or start empty."),
+        vec![stat(
+            AppIcon::Cloud,
+            count.to_string(),
+            format!("on {service}"),
+        )],
         vec![
-            ("Start empty", start(false, model)),
-            ("Copy my list", start(true, model)),
+            card(
+                AppIcon::Copy,
+                "Copy my list",
+                format!("Your {service} list as it is now"),
+                true,
+                start(true, model),
+            ),
+            card(
+                AppIcon::FilePlus,
+                "Start empty",
+                "Add anime as you go",
+                false,
+                start(false, model),
+            ),
         ],
         window,
         cx,
@@ -390,17 +522,11 @@ fn to_local(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
 pub fn change(model: &Entity<Model>, to: ListLocation, window: &mut Window, cx: &mut App) {
     let (current, has_local, service, count, signed_in) = {
         let model = model.read(cx);
-        let count = model
-            .state()
-            .entries
-            .values()
-            .filter(|e| is_in_list(Some(e)))
-            .count();
         (
             model.state().settings.list,
             model.startup.has_local_list(),
             model.service_name(),
-            count,
+            list_count(model),
             model.account().token.is_some(),
         )
     };
@@ -415,11 +541,14 @@ pub fn change(model: &Entity<Model>, to: ListLocation, window: &mut Window, cx: 
             model.move_list(ListLocation::Account, false, cx)
         }),
         ListLocation::Local if !has_local => to_local(&model, window, cx),
-        ListLocation::Local => choose(
+        ListLocation::Local => ask(
             "Use the list on this computer?",
-            format!("Your {service} list stays as it is."),
-            vec![(
+            Vec::new(),
+            vec![card(
+                AppIcon::Laptop,
                 "Use this computer",
+                format!("Your {service} list stays as it is"),
+                true,
                 Rc::new(move |window, cx| to_local(&model, window, cx)),
             )],
             window,
@@ -437,33 +566,52 @@ pub fn change(model: &Entity<Model>, to: ListLocation, window: &mut Window, cx: 
                     })
                 })
             };
-            let (text, choices) = if count == 0 {
+            let here = stat(AppIcon::Laptop, count.to_string(), "on this computer");
+            let there = stat(AppIcon::Cloud, service, "your account");
+            let (stats, cards) = if count == 0 {
                 (
-                    "The list on this computer is kept, so you can switch back.".to_owned(),
-                    vec![("Use AniList", use_account(false))],
+                    Vec::new(),
+                    vec![card(
+                        AppIcon::Cloud,
+                        "Use AniList",
+                        "You can switch back any time",
+                        true,
+                        use_account(false),
+                    )],
                 )
             } else if signed_in {
                 (
-                    format!(
-                        "Upload the {count} anime on this computer to {service}? Nothing on \
-                         {service} is removed, and the list on this computer is kept."
-                    ),
+                    vec![here, there],
                     vec![
-                        ("Don't upload", use_account(false)),
-                        ("Upload my list", use_account(true)),
+                        card(
+                            AppIcon::CloudUpload,
+                            "Upload my list",
+                            "Adds what AniList lacks. Removes nothing.",
+                            true,
+                            use_account(true),
+                        ),
+                        card(
+                            AppIcon::Cloud,
+                            "Just use AniList",
+                            "Keep the list on this computer apart",
+                            false,
+                            use_account(false),
+                        ),
                     ],
                 )
             } else {
                 (
-                    format!(
-                        "To upload the {count} anime on this computer, sign in to {service} \
-                         first; Settings then offers to upload them. The list on this \
-                         computer is kept."
-                    ),
-                    vec![("Use AniList", use_account(false))],
+                    vec![here],
+                    vec![card(
+                        AppIcon::LogIn,
+                        "Use AniList",
+                        "Sign in, then upload from Settings",
+                        true,
+                        use_account(false),
+                    )],
                 )
             };
-            choose("Use your AniList account?", text, choices, window, cx);
+            ask("Use your AniList account?", stats, cards, window, cx);
         }
     }
 }
@@ -488,14 +636,17 @@ pub fn ask_upload(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
         return;
     }
     let model = model.clone();
-    choose(
+    ask(
         "Upload the list from this computer?",
-        format!(
-            "{count} anime are added to {service}, or updated where yours are further along. \
-             Nothing on {service} is removed."
-        ),
-        vec![(
+        vec![
+            stat(AppIcon::Laptop, count.to_string(), "on this computer"),
+            stat(AppIcon::Cloud, service, "your account"),
+        ],
+        vec![card(
+            AppIcon::CloudUpload,
             "Upload",
+            "Adds what AniList lacks. Removes nothing.",
+            true,
             Rc::new(move |_, cx| model.update(cx, |model, cx| model.upload_local_list(cx))),
         )],
         window,
