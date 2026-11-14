@@ -35,9 +35,11 @@ Because the player then has the file open, Shiori detects it like any other play
 
 ## Browsing your files
 
-The library view shows your library folders as a tree. Next to each file you see the anime and episode Shiori recognizes it as, the file type, size and date. This is the quickest way to spot files that are not recognized.
+The library view has two views, switched with the buttons at the top.
 
-From there you can open a file, open the details of its anime, rename it, or delete it. Deleting asks first and moves the file to the trash (the Recycle Bin on Windows), so it can be restored.
+**By anime** (the default) groups your video files under the anime Shiori recognizes them as, with its cover and the episodes you have, such as "Ep 1-3, 5". Files that matched nothing are listed first on an amber row, each with a "Match..." button that links the file to an anime, or "Numbering..." when the title matched but the episode number is past the anime's last episode. The header shows how many files are matched; "N need a match" shows only those files. Clicking an anime shows its files and opens it in the inspector.
+
+**Files** shows your library folders as a tree. Next to each file you see the anime and episode Shiori recognizes it as, the file type, size and date. From there you can open a file, open the details of its anime, rename it, or delete it. Deleting asks first and moves the file to the trash (the Recycle Bin on Windows), so it can be restored.
 
 Shiori reads the folders when you first open the library view, when you choose "Scan available episodes" and when you change your library folders. It does not read them at start-up.
 

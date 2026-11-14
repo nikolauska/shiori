@@ -2,6 +2,7 @@
 //! recognized as (ui.md, "Library").
 
 use std::collections::HashSet;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -9,19 +10,22 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
     PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    WeakEntity, Window, div, px,
+    WeakEntity, Window, div, px, uniform_list,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::table::{Column, DataTable, TableDelegate, TableEvent, TableState};
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
+    StyledExt as _, h_flex, v_flex,
 };
-use shiori_core::Episode;
+use shiori_core::{AnimeId, Episode};
 use shiori_library::{Node, NodeKind};
 
+use super::library_groups::{self, Group};
+use crate::ui::icons::AppIcon;
 use crate::ui::model::Model;
-use crate::ui::{actions, inspector, link_picker, numbering_editor};
+use crate::ui::{actions, inspector, link_picker, numbering_editor, poster, widgets};
 use shiori_core::recognition::number_miss;
 
 gpui::actions!(library, [OpenItem, RenameItem, DeleteItem]);
@@ -266,24 +270,50 @@ impl TableDelegate for LibraryDelegate {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let model = self.model.read(cx);
-        let text = if model.state().settings.library_folders.is_empty() {
-            "No library folders yet. Add the folders where you keep anime."
-        } else if model.library.scanning {
-            "Reading the library folders..."
+        if model.library.scanning {
+            widgets::empty_state(IconName::RefreshCw, "Reading the folders...", "", None, cx)
         } else {
-            "The library folders are empty."
-        };
-        h_flex()
-            .size_full()
-            .justify_center()
-            .text_color(cx.theme().muted_foreground)
-            .child(text)
+            widgets::empty_state(
+                IconName::Folder,
+                "Nothing here",
+                "The library folders are empty.",
+                None,
+                cx,
+            )
+        }
     }
 }
+
+/// The Library page's two ways of showing the same files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum View {
+    /// Files under the anime they were recognized as.
+    ByAnime,
+    /// The folder tree, for opening, renaming and deleting files.
+    Files,
+}
+
+/// One line of the "By anime" view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Item {
+    Unmatched(usize),
+    Anime(usize),
+    File(usize, usize),
+}
+
+/// Every line of the "By anime" view is this tall, as the list needs.
+const ITEM_HEIGHT: f32 = 52.;
 
 pub struct LibraryPage {
     model: Entity<Model>,
     table: Entity<TableState<LibraryDelegate>>,
+    view: View,
+    groups: Vec<Group>,
+    unmatched: Vec<PathBuf>,
+    /// Anime whose files are shown under them.
+    expanded: HashSet<AnimeId>,
+    /// Only the files that need a match are shown.
+    only_unmatched: bool,
     /// Folders shown open. Library folders start open, the rest closed.
     open: HashSet<PathBuf>,
     seen_roots: HashSet<PathBuf>,
@@ -337,6 +367,11 @@ impl LibraryPage {
         let mut page = Self {
             model,
             table,
+            view: View::ByAnime,
+            groups: Vec::new(),
+            unmatched: Vec::new(),
+            expanded: HashSet::new(),
+            only_unmatched: false,
             open: HashSet::new(),
             seen_roots: HashSet::new(),
             generation: 0,
@@ -357,6 +392,14 @@ impl LibraryPage {
         let mut rows = Vec::new();
         for root in &library.roots {
             flatten(root, 0, &self.open, &mut rows);
+        }
+        let model = self.model.read(cx);
+        let (groups, unmatched) =
+            library_groups::group(&model.library.recognized, |id| model.state().title(id));
+        self.groups = groups;
+        self.unmatched = unmatched;
+        if self.unmatched.is_empty() {
+            self.only_unmatched = false;
         }
         self.table.update(cx, |table, cx| {
             table.delegate_mut().rows = rows;
@@ -457,6 +500,234 @@ impl LibraryPage {
     }
 }
 
+impl LibraryPage {
+    fn items(&self) -> Vec<Item> {
+        let mut items: Vec<Item> = (0..self.unmatched.len()).map(Item::Unmatched).collect();
+        if self.only_unmatched {
+            return items;
+        }
+        for (g, group) in self.groups.iter().enumerate() {
+            items.push(Item::Anime(g));
+            if self.expanded.contains(&group.anime) {
+                items.extend((0..group.files.len()).map(|f| Item::File(g, f)));
+            }
+        }
+        items
+    }
+
+    fn render_item(&mut self, item: Item, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let theme = cx.theme();
+        let (muted, warning, success, hover) = (
+            theme.muted_foreground,
+            theme.warning,
+            theme.success,
+            theme.table_hover,
+        );
+        let row = h_flex()
+            .h(px(ITEM_HEIGHT))
+            .w_full()
+            .gap_3()
+            .px_2()
+            .rounded_md();
+        match item {
+            Item::Unmatched(ix) => {
+                let Some(path) = self.unmatched.get(ix).cloned() else {
+                    return div().into_any_element();
+                };
+                let model = self.model.read(cx);
+                // A title that matched with a number past the anime's
+                // episodes is fixed with a numbering, not a link.
+                let miss = model.library.recognized.get(&path).and_then(|e| {
+                    let state = model.state();
+                    shiori_core::recognition::number_miss(e, &state.title_index, &state.anime)
+                });
+                let folder = path
+                    .parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                let link_model = self.model.clone();
+                let link_path = path.clone();
+                let action = match miss {
+                    Some(miss) => {
+                        let model = self.model.clone();
+                        Button::new(("numbering", ix))
+                            .small()
+                            .label("Numbering...")
+                            .on_click(move |_, window, cx| {
+                                numbering_editor::open_for_anime(
+                                    &model,
+                                    miss.anime,
+                                    Some((miss.anime, miss.range.1)),
+                                    window,
+                                    cx,
+                                )
+                            })
+                    }
+                    None => Button::new(("match", ix))
+                        .small()
+                        .icon(AppIcon::Link2)
+                        .label("Match...")
+                        .on_click(move |_, window, cx| {
+                            link_picker::open(
+                                &link_model,
+                                link_picker::Target::File(link_path.clone()),
+                                window,
+                                cx,
+                            )
+                        }),
+                };
+                row.id(("unmatched", ix))
+                    .bg(warning.opacity(0.08))
+                    .child(widgets::tinted_icon_tile(IconName::TriangleAlert, warning))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .truncate()
+                                    .child(library_groups::file_name(&path)),
+                            )
+                            .child(div().text_xs().text_color(muted).truncate().child(folder)),
+                    )
+                    .child(action)
+                    .into_any_element()
+            }
+            Item::Anime(g) => {
+                let Some(group) = self.groups.get(g) else {
+                    return div().into_any_element();
+                };
+                let id = group.anime;
+                let open = self.expanded.contains(&id);
+                let count = group.files.len();
+                let episodes = group.episodes_label();
+                let detail = match (episodes.is_empty(), count) {
+                    (true, 1) => "1 file".to_owned(),
+                    (true, n) => format!("{n} files"),
+                    (false, 1) => format!("Ep {episodes}"),
+                    (false, n) => format!("Ep {episodes} · {n} files"),
+                };
+                row.id(("anime", g))
+                    .cursor_pointer()
+                    .hover(move |row| row.bg(hover))
+                    .child(
+                        Icon::new(if open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .xsmall()
+                        .text_color(muted),
+                    )
+                    .child(
+                        div()
+                            .w(px(28.))
+                            .h(px(40.))
+                            .flex_none()
+                            .rounded_sm()
+                            .overflow_hidden()
+                            .child(poster::view(&self.model, id, cx)),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().font_semibold().truncate().child(group.title.clone()))
+                            .child(div().text_xs().text_color(muted).child(detail)),
+                    )
+                    .child(Icon::new(AppIcon::CircleCheck).small().text_color(success))
+                    // Opening a group also shows the anime in the inspector,
+                    // the quickest way to check the match is right.
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.expanded.remove(&id) {
+                            this.expanded.insert(id);
+                        }
+                        this.model.update(cx, |model, cx| model.select(id, cx));
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            }
+            Item::File(g, f) => {
+                let Some(file) = self.groups.get(g).and_then(|g| g.files.get(f)) else {
+                    return div().into_any_element();
+                };
+                let episode = match file.episodes {
+                    Some((first, last)) if last > first => format!("Ep {first}-{last}"),
+                    Some((first, _)) => format!("Ep {first}"),
+                    None => String::new(),
+                };
+                let path = file.path.clone();
+                row.id(("file", g * 10_000 + f))
+                    .h(px(ITEM_HEIGHT))
+                    .pl(px(52.))
+                    .hover(move |row| row.bg(hover))
+                    .child(
+                        div()
+                            .w(px(64.))
+                            .flex_none()
+                            .text_xs()
+                            .font_semibold()
+                            .child(episode),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(muted)
+                            .truncate()
+                            .child(file.name.clone()),
+                    )
+                    .child(
+                        Button::new(("play-file", g * 10_000 + f))
+                            .ghost()
+                            .small()
+                            .icon(IconName::Play)
+                            .tooltip("Open")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.model
+                                    .update(cx, |model, cx| model.open_file(&path, cx));
+                            })),
+                    )
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn render_by_anime(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let items = self.items();
+        if items.is_empty() {
+            let scanning = self.model.read(cx).library.scanning;
+            return if scanning {
+                widgets::empty_state(IconName::RefreshCw, "Reading the folders...", "", None, cx)
+            } else {
+                widgets::empty_state(
+                    IconName::Folder,
+                    "No videos found",
+                    "The library folders have no video files Shiori can read.",
+                    None,
+                    cx,
+                )
+            }
+            .into_any_element();
+        }
+        let view = cx.entity();
+        uniform_list(
+            "library-items",
+            items.len(),
+            move |range: Range<usize>, _, cx| {
+                range
+                    .map(|ix| view.update(cx, |this, cx| this.render_item(items[ix], cx)))
+                    .collect()
+            },
+        )
+        .size_full()
+        .into_any_element()
+    }
+}
+
 /// The rows shown for `node`: itself, then its children while it is open.
 fn flatten(node: &Node, depth: usize, open: &HashSet<PathBuf>, rows: &mut Vec<Row>) {
     let is_open = open.contains(&node.path);
@@ -484,31 +755,100 @@ impl Render for LibraryPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let model = self.model.read(cx);
         let library = &model.library;
+        let no_folders = model.state().settings.library_folders.is_empty();
+        let scanning = library.scanning;
         let files = library.recognized.len();
-        let known = library
-            .recognized
-            .values()
-            .filter(|e| e.anime_id.is_some())
-            .count();
-        let summary = if library.scanning {
-            format!("Scanning... {known} of {files} video files recognized so far")
-        } else if library.roots.is_empty() {
-            String::new()
-        } else {
-            format!("{known} of {files} video files recognized")
-        };
+        let known = files - self.unmatched.len();
+        let theme = cx.theme();
+        let (muted, warning) = (theme.muted_foreground, theme.warning);
+        let add = Button::new("add-folder")
+            .small()
+            .icon(IconName::Plus)
+            .label("Add folder...")
+            .on_click(cx.listener(|this, _, window, cx| this.add_folder(window, cx)));
+        if no_folders {
+            return v_flex()
+                .size_full()
+                .p_3()
+                .child(div().text_lg().child("Library"))
+                .child(widgets::empty_state(
+                    IconName::Folder,
+                    "No folders yet",
+                    "Add the folders where you keep anime.",
+                    Some(add.primary().into_any_element()),
+                    cx,
+                ));
+        }
+        let progress = (files > 0).then(|| {
+            h_flex()
+                .gap_2()
+                .child(
+                    div()
+                        .w(px(120.))
+                        .child(widgets::progress_bar(known as f32 / files as f32, cx)),
+                )
+                .child(div().text_xs().text_color(muted).child(if scanning {
+                    format!("{known} of {files} matched so far")
+                } else {
+                    format!("{known} of {files} matched")
+                }))
+        });
+        let need = self.unmatched.len();
+        let need_chip = (need > 0 && self.view == View::ByAnime).then(|| {
+            h_flex()
+                .id("need-match")
+                .gap_1()
+                .px_2()
+                .py_0p5()
+                .rounded_full()
+                .cursor_pointer()
+                .text_xs()
+                .text_color(warning)
+                .bg(warning.opacity(if self.only_unmatched { 0.25 } else { 0.12 }))
+                .child(Icon::new(IconName::TriangleAlert).xsmall())
+                .child(format!("{need} need a match"))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.only_unmatched = !this.only_unmatched;
+                    cx.notify();
+                }))
+        });
+        let views = ButtonGroup::new("library-view")
+            .outline()
+            .small()
+            .child(
+                Button::new("by-anime")
+                    .icon(AppIcon::LayoutList)
+                    .tooltip("By anime")
+                    .selected(self.view == View::ByAnime),
+            )
+            .child(
+                Button::new("files")
+                    .icon(IconName::Folder)
+                    .tooltip("Files")
+                    .selected(self.view == View::Files),
+            )
+            .on_click(cx.listener(|this, clicked: &Vec<usize>, _, cx| {
+                this.view = if clicked.contains(&1) {
+                    View::Files
+                } else {
+                    View::ByAnime
+                };
+                cx.notify();
+            }));
         let scan = Button::new("scan")
             .ghost()
             .small()
-            .label("Scan")
-            .disabled(library.scanning)
+            .icon(IconName::RefreshCw)
+            .tooltip("Scan the folders again")
+            .loading(scanning)
+            .disabled(scanning)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.model.update(cx, |model, cx| model.scan_library(cx))
             }));
-        let add = Button::new("add-folder")
-            .small()
-            .label("Add folder...")
-            .on_click(cx.listener(|this, _, window, cx| this.add_folder(window, cx)));
+        let body = match self.view {
+            View::ByAnime => self.render_by_anime(cx),
+            View::Files => DataTable::new(&self.table).stripe(true).into_any_element(),
+        };
         v_flex()
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::on_open))
@@ -521,21 +861,13 @@ impl Render for LibraryPage {
                 h_flex()
                     .gap_3()
                     .child(div().text_lg().child("Library"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(summary),
-                    )
+                    .children(progress)
+                    .children(need_chip)
                     .child(div().flex_1())
+                    .child(views)
                     .child(scan)
                     .child(add),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(DataTable::new(&self.table).stripe(true)),
-            )
+            .child(div().flex_1().min_h_0().child(body))
     }
 }

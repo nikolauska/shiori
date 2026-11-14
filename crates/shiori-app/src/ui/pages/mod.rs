@@ -3,6 +3,7 @@
 mod history;
 mod home;
 pub mod library;
+mod library_groups;
 mod list;
 mod search;
 pub mod settings;

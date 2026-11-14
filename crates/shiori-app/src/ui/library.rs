@@ -326,10 +326,7 @@ impl Model {
     }
 
     fn no_folders(&mut self, cx: &mut Context<Self>) {
-        self.set_error(
-            "No library folders yet. Add the folders with your anime in Settings, under Library.",
-            cx,
-        );
+        self.set_error("No library folders yet. Add one on the Library page.", cx);
     }
 
     pub fn add_library_folders(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
