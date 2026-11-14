@@ -230,6 +230,21 @@ impl MainWindow {
         .detach();
     }
 
+    fn export_mal_xml(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let path = cx.prompt_for_new_path(&home, Some("animelist.xml"));
+        let model = self.model.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(path))) = path.await {
+                model.update(cx, |model, cx| model.export_mal_xml(path, cx));
+            }
+        })
+        .detach();
+    }
+
     fn menu(
         model: Entity<Model>,
         view: gpui::WeakEntity<Self>,
@@ -309,6 +324,14 @@ impl MainWindow {
                 },
             ),
         )
+        .item({
+            let v = view.clone();
+            PopupMenuItem::new("Export anime list as MyAnimeList XML...").on_click(
+                move |_, window, cx| {
+                    let _ = v.update(cx, |this, cx| this.export_mal_xml(window, cx));
+                },
+            )
+        })
         .separator()
         .item(
             PopupMenuItem::new("Settings...")

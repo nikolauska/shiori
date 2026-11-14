@@ -8,6 +8,7 @@ mod inspector;
 mod library;
 mod link_picker;
 mod list_location;
+mod list_transfer;
 mod main_window;
 mod model;
 mod now_playing;

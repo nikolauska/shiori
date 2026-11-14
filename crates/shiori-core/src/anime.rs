@@ -77,6 +77,8 @@ pub struct Titles {
 #[serde(default)]
 pub struct Anime {
     pub id: AnimeId,
+    /// The same anime's MyAnimeList id, when the service knows it.
+    pub mal_id: Option<u32>,
     /// When Shiori last received this anime from the service.
     pub last_modified: Option<Timestamp>,
     pub episode_count: Option<u32>,
@@ -137,6 +139,7 @@ impl Anime {
             tags: Vec::new(),
             last_aired_episode: 0,
             next_episode_time: None,
+            mal_id: None,
         }
     }
 }

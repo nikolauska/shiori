@@ -29,6 +29,9 @@ gpui-kit-assets = "=0.9.1"
 # Picks the episode for "Random episode" and the anime for "Play random
 # anime"; already in the tree through gpui.
 fastrand = "2.5.0"
+# Reads MyAnimeList's gzipped list exports; already in the tree through
+# reqwest's gzip support.
+flate2 = "1.1.11"
 # Decodes the app icon for the window and the tray; gpui uses it already.
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # The Linux display backends are opt-in features; without them gpui
@@ -37,6 +40,8 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features =
 keyring = "4.2.0"
 jiff = { version = "0.2.43", features = ["serde"] }
 regex = "1.13.1"
+# Reads MyAnimeList XML list exports; already in the tree through gpui.
+roxmltree = "0.21.2"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "socks", "gzip", "json"] }
 rusqlite = { version = "0.42.0", features = ["backup", "bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

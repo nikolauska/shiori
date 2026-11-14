@@ -136,11 +136,23 @@ impl AniList {
     /// date without a request per anime. Anime AniList no longer has are
     /// simply missing from the answer.
     pub async fn fetch_anime_by_ids(&self, ids: &[AnimeId]) -> Result<Vec<Anime>, ServiceError> {
-        debug_assert!(ids.len() <= Self::IDS_PER_REQUEST);
         let ids: Vec<u32> = ids.iter().map(|id| id.0).collect();
+        self.fetch_page(include_str!("queries/media_by_ids.graphql"), &ids)
+            .await
+    }
+
+    /// Anime by their MyAnimeList ids, for importing a MyAnimeList list.
+    /// Each has its `mal_id` set to the id it was found by.
+    pub async fn fetch_anime_by_mal_ids(&self, ids: &[u32]) -> Result<Vec<Anime>, ServiceError> {
+        self.fetch_page(include_str!("queries/media_by_mal_ids.graphql"), ids)
+            .await
+    }
+
+    async fn fetch_page(&self, query: &str, ids: &[u32]) -> Result<Vec<Anime>, ServiceError> {
+        debug_assert!(ids.len() <= Self::IDS_PER_REQUEST);
         let data: PageData = self
             .request(
-                include_str!("queries/media_by_ids.graphql"),
+                query,
                 json!({ "ids": ids }),
                 None,
                 "Could not parse anime details.",

@@ -21,6 +21,17 @@ Without an account, the list on your computer is the only copy, so Shiori backs 
 
 Restoring replaces your whole list (entries, history, per-anime settings, title links and episode numbering) with the backup's. Shiori asks first, and saves the list as it was to `backups/before-restore.sqlite`, so restoring the wrong file can be undone. Files that are not Shiori backups, or that come from a newer Shiori, are refused and change nothing.
 
+### Moving your list in and out
+
+From Settings, a list on this computer can take in:
+
+- A MyAnimeList XML file: what MyAnimeList, AniList and Taiga export, gzipped or not.
+- A public AniList list, by its username. Nothing is signed in to and nothing is sent to that account.
+
+Only anime that are not in your list yet are added; anything already there is left as it is, since it may have newer progress. Afterwards Shiori says how many were added, how many were already there, and which ones AniList does not have.
+
+Any list can be exported as a MyAnimeList XML file, which MyAnimeList and AniList both import. Anime without a MyAnimeList id cannot be in it; Shiori names them after exporting.
+
 It is kept apart from your AniList list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens your AniList list as you left it, and the list on this computer stays, so you can switch back.
 
 ## Signing in

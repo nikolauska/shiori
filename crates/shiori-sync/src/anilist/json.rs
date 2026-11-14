@@ -175,6 +175,7 @@ pub(crate) struct MediaData {
 #[serde(default, rename_all = "camelCase")]
 pub(crate) struct MediaJson {
     id: Option<u32>,
+    id_mal: Option<u32>,
     title: Option<TitleJson>,
     format: Option<String>,
     status: Option<String>,
@@ -280,6 +281,7 @@ pub(crate) fn to_anime(m: MediaJson, now: Timestamp) -> Option<Anime> {
     let id = m.id.filter(|&id| id != 0)?;
     let mut anime = Anime::new(AnimeId(id));
     anime.last_modified = Some(now);
+    anime.mal_id = m.id_mal.filter(|&id| id != 0);
     anime.episode_count = m.episodes;
     anime.episode_length = m.duration;
     anime.status = match m.status.as_deref() {
@@ -604,6 +606,7 @@ mod tests {
         let data: MediaData = ok(MEDIA);
         let anime = to_anime(data.media.unwrap(), now()).unwrap();
         assert_eq!(anime.id, AnimeId(4224));
+        assert_eq!(anime.mal_id, Some(4224));
         assert_eq!(anime.last_modified, Some(now()));
         assert_eq!(anime.titles.romaji, "Toradora!");
         assert_eq!(anime.titles.english, "Toradora!");

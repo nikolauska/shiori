@@ -39,7 +39,7 @@ Every few seconds Shiori looks for a media player it knows. If one is playing a 
 - One list service active at a time: AniList, MyAnimeList or Kitsu.
 - Working offline: changes are kept and sent later.
 - Keeping your list on this computer only, without an account.
-- Exporting your list as a text document.
+- Exporting your list as a text document or a MyAnimeList XML file, and importing one into a list kept on this computer.
 
 ## What it does not include yet
 

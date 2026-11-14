@@ -20,6 +20,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("sql/001_create.sql"),
     include_str!("sql/002_linked_titles.sql"),
     include_str!("sql/003_numbering.sql"),
+    include_str!("sql/004_mal_id.sql"),
 ];
 
 /// Everything loaded at start.
@@ -178,9 +179,9 @@ impl Database {
                 "INSERT INTO anime (id, title, english, japanese, synonym, type, status,
                     episode_count, episode_length, date_start, date_end, image, trailer_id,
                     slug, age_rating, genres, tags, producers, studios, score, popularity,
-                    synopsis, last_aired_episode, next_episode_time, modified)
+                    synopsis, last_aired_episode, next_episode_time, modified, mal_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
+                    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
                  ON CONFLICT (id) DO UPDATE SET
                     title = excluded.title, english = excluded.english,
                     japanese = excluded.japanese, synonym = excluded.synonym,
@@ -196,7 +197,7 @@ impl Database {
                     synopsis = excluded.synopsis,
                     last_aired_episode = excluded.last_aired_episode,
                     next_episode_time = excluded.next_episode_time,
-                    modified = excluded.modified",
+                    modified = excluded.modified, mal_id = excluded.mal_id",
             )?;
             for a in items {
                 stmt.execute(params![
@@ -225,6 +226,7 @@ impl Database {
                     a.last_aired_episode,
                     a.next_episode_time.map(Timestamp::as_second),
                     a.last_modified.map(Timestamp::as_second),
+                    a.mal_id,
                 ])?;
             }
         }
@@ -246,7 +248,7 @@ impl Database {
             "SELECT id, title, english, japanese, synonym, type, status, episode_count,
                 episode_length, date_start, date_end, image, trailer_id, slug, age_rating,
                 genres, tags, producers, studios, score, popularity, synopsis,
-                last_aired_episode, next_episode_time, modified
+                last_aired_episode, next_episode_time, modified, mal_id
              FROM anime",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -278,6 +280,7 @@ impl Database {
                 last_aired_episode: row.get(22)?,
                 next_episode_time: timestamp(row.get(23)?),
                 last_modified: timestamp(row.get(24)?),
+                mal_id: row.get(25)?,
             })
         })?;
         let mut map = BTreeMap::new();

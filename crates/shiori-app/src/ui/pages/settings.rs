@@ -19,7 +19,7 @@ use shiori_sync::anilist;
 
 use crate::ui::model::Model;
 use crate::ui::widgets::Choice;
-use crate::ui::{actions, format, list_location, numbering_editor};
+use crate::ui::{actions, format, list_location, list_transfer, numbering_editor};
 
 const SECTIONS: [&str; 8] = [
     "Accounts",
@@ -254,6 +254,63 @@ impl SettingsView {
         cx.spawn_in(window, async move |_, cx| {
             if let Ok(Ok(Some(path))) = path.await {
                 model.update(cx, |model, cx| model.back_up_to(path, cx));
+            }
+        })
+        .detach();
+    }
+
+    fn import_xml(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import".into()),
+        });
+        let model = self.model.clone();
+        let handle = window.window_handle();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(mut paths))) = paths.await
+                && let Some(path) = paths.pop()
+            {
+                model.update(cx, |model, cx| {
+                    model.import_mal_xml(path, list_transfer::show_summary(handle), cx)
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn copy_public(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.clone();
+        let handle = window.window_handle();
+        actions::prompt(
+            "Whose AniList list?",
+            String::new(),
+            window,
+            cx,
+            move |name, _, cx| {
+                let name = name.trim().to_owned();
+                if name.is_empty() {
+                    return false;
+                }
+                model.update(cx, |model, cx| {
+                    model.copy_public_list(name, list_transfer::show_summary(handle), cx)
+                });
+                true
+            },
+        );
+    }
+
+    fn export_xml(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let path = cx.prompt_for_new_path(&home, Some("animelist.xml"));
+        let model = self.model.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(path))) = path.await {
+                model.update(cx, |model, cx| model.export_mal_xml(path, cx));
             }
         })
         .detach();
@@ -540,6 +597,33 @@ impl SettingsView {
                                 |s, v| s.backup_weekly = v,
                                 cx,
                             ))
+                            .child(label("Move your list"))
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .flex_wrap()
+                                    .child(
+                                        Button::new("import-xml")
+                                            .label("Import MyAnimeList XML...")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.import_xml(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("copy-public")
+                                            .label("Copy a public AniList list...")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.copy_public(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("export-xml")
+                                            .label("Export as MyAnimeList XML...")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.export_xml(window, cx)
+                                            })),
+                                    ),
+                            )
                     })
                     // Syncing and signing in mean nothing for a local list.
                     .when(!local, |el| {

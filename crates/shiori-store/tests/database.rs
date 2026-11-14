@@ -35,6 +35,7 @@ fn full_anime(id: u32) -> Anime {
         tags: vec!["School".into()],
         last_aired_episode: 25,
         next_episode_time: Some(ts(1_700_000_100)),
+        mal_id: Some(4224),
     }
 }
 
@@ -63,12 +64,12 @@ fn schema_is_created_once() {
     let path = dir.path().join("data/anilist.sqlite");
     {
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 3);
+        assert_eq!(db.schema_version().unwrap(), 4);
         db.upsert_anime(&[full_anime(1)]).unwrap();
     }
     // Reopening keeps the data and does not run the migration again.
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 3);
+    assert_eq!(db.schema_version().unwrap(), 4);
     assert_eq!(db.load_all().unwrap().anime.len(), 1);
 }
 
@@ -89,10 +90,13 @@ fn a_first_version_file_gains_linked_titles_and_keeps_its_settings() {
         conn.pragma_update(None, "user_version", 1).unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 3);
+    assert_eq!(db.schema_version().unwrap(), 4);
     let settings = &db.load_all().unwrap().anime_settings[&AnimeId(5)];
     assert_eq!(settings.synonyms, ["One"]);
     assert!(settings.linked.is_empty());
+    // Anime stored before MyAnimeList ids were kept have none yet.
+    db.upsert_anime(&[full_anime(1)]).unwrap();
+    assert_eq!(db.load_all().unwrap().anime[&AnimeId(1)].mal_id, Some(4224));
 }
 
 #[test]
