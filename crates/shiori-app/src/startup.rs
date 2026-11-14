@@ -119,6 +119,13 @@ impl Context {
         self.folders.local_database_file().exists()
     }
 
+    /// Everything in the list kept on this computer, while another list is
+    /// the current one.
+    pub fn load_local_list(&self) -> Result<shiori_store::Loaded> {
+        let db = Database::open(&self.folders.local_database_file())?;
+        Ok(db.load_all()?)
+    }
+
     /// Opens the list kept at `to` and makes it the current one. Moving to
     /// this computer for the first time starts an empty list, or a copy of
     /// the current one when `copy` is set. Nothing changes when it fails.

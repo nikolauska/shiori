@@ -560,6 +560,8 @@ impl SettingsView {
                 };
                 let local = state.is_local();
                 let last_backup = list_location::backed_up(model.last_backup);
+                // Uploading needs the account's token, and something to upload.
+                let can_upload = model.startup.has_local_list() && model.account().token.is_some();
                 let handle = self.model.clone();
                 let location = RadioGroup::vertical("list-location")
                     .child(Radio::new("local").label("On this computer"))
@@ -652,6 +654,17 @@ impl SettingsView {
                                     cx.listener(|this, _, window, cx| this.sign_in(window, cx)),
                                 )),
                         )
+                        .when(can_upload, |el| {
+                            el.child(label("List on this computer")).child(
+                                h_flex().child(
+                                    Button::new("upload")
+                                        .label("Upload it to AniList...")
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            list_location::ask_upload(&this.model, window, cx)
+                                        })),
+                                ),
+                            )
+                        })
                     })
                     .into_any_element()
             }

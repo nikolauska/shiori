@@ -34,6 +34,18 @@ Any list can be exported as a MyAnimeList XML file, which MyAnimeList and AniLis
 
 It is kept apart from your AniList list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens your AniList list as you left it, and the list on this computer stays, so you can switch back.
 
+### Uploading to your account
+
+When you move a list that has anime in it to your AniList account and are signed in, Shiori asks whether to upload it. If you are not signed in yet, sign in first; Settings then offers "Upload it to AniList" for as long as the list on this computer exists.
+
+Uploading first fetches your AniList list, so it works with what is there now, then:
+
+- Adds every anime AniList does not have.
+- For anime on both, moves progress and status forward only (Completed beats Watching; Watching, On hold and Dropped don't replace each other), and fills in score, notes and dates only where AniList has none.
+- Removes nothing from AniList.
+
+The changes are sent like any other edit. If AniList cannot be reached, nothing is uploaded and Shiori says so.
+
 ## Signing in
 
 | Service | How you sign in |

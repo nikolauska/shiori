@@ -46,6 +46,9 @@ pub struct Model {
     pub(super) syncing: bool,
     /// Anime data is being refreshed for a local list; a second start waits.
     pub(super) refreshing: bool,
+    /// The list on this computer is merged into the account's list after
+    /// the next successful fetch, when the account's list is fresh.
+    pub(super) pending_upload: bool,
     /// The day of the newest automatic backup of a local list.
     pub last_backup: Option<jiff::civil::Date>,
     pub posters: Posters,
@@ -102,6 +105,7 @@ impl Model {
             status: Status::default(),
             syncing: false,
             refreshing: false,
+            pending_upload: false,
             last_backup,
             posters: Posters::default(),
             session,
@@ -577,6 +581,14 @@ impl Model {
 
     fn sync_done(&mut self, cx: &mut Context<Self>) {
         self.syncing = false;
+        // The sync ended without a fetch, so there was no fresh list to
+        // merge into. Uploading later, by surprise, would be worse.
+        if std::mem::take(&mut self.pending_upload) {
+            self.set_error(
+                "Could not reach your list, so nothing was uploaded. Try again from Settings.",
+                cx,
+            );
+        }
         if let Err(error) = self.startup.save_accounts() {
             tracing::error!("Could not save accounts: {error:#}");
         }
@@ -627,6 +639,7 @@ impl Model {
                     async move { service.fetch_list(&account, &|_, _| {}).await },
                     cx,
                     |this, result, cx| {
+                        let mut uploaded = false;
                         match result {
                             Ok(list) => {
                                 let result = this.startup.state.apply_list(list);
@@ -634,10 +647,17 @@ impl Model {
                                 if !this.status.is_error {
                                     this.set_status("List synchronized.", cx);
                                 }
+                                if std::mem::take(&mut this.pending_upload) {
+                                    uploaded = this.upload_now(cx);
+                                }
                             }
                             Err(error) => this.service_error(error, cx),
                         }
                         this.sync_done(cx);
+                        // The merge only queued the changes; this sends them.
+                        if uploaded {
+                            this.synchronize(cx);
+                        }
                     },
                 );
             }

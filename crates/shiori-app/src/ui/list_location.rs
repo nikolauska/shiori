@@ -9,9 +9,9 @@ use gpui_component::{WindowExt as _, h_flex};
 use std::path::PathBuf;
 
 use jiff::Timestamp;
-use shiori_app::backup;
 use shiori_app::refresh::anime_to_refresh;
 use shiori_app::state::AppEvent;
+use shiori_app::{backup, upload};
 use shiori_core::AnimeId;
 use shiori_core::entry::is_in_list;
 use shiori_store::ListLocation;
@@ -93,6 +93,61 @@ impl Model {
             Err(error) => {
                 tracing::error!("Could not back up the list: {error:#}");
                 self.set_error(format!("Could not back up your list: {error:#}"), cx);
+            }
+        }
+    }
+
+    /// Uploads the list kept on this computer to the account. The merge
+    /// waits for the account's list to be fetched, so it is made against
+    /// what the account has now.
+    pub fn upload_local_list(&mut self, cx: &mut Context<Self>) {
+        if self.state().is_local() || !self.startup.has_local_list() {
+            return;
+        }
+        self.pending_upload = true;
+        self.set_status("Uploading the list from this computer...", cx);
+        // A sync already running picks the upload up at its fetch.
+        if !self.syncing {
+            self.synchronize(cx);
+        }
+    }
+
+    /// Merges the local list into the freshly fetched account list. True
+    /// when something was queued to send.
+    pub(super) fn upload_now(&mut self, cx: &mut Context<Self>) -> bool {
+        let loaded = match self.startup.load_local_list() {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                tracing::error!("Could not read the local list: {error:#}");
+                self.set_error(
+                    format!("Could not read the list on this computer: {error:#}"),
+                    cx,
+                );
+                return false;
+            }
+        };
+        let result = upload::merge(
+            &mut self.startup.state,
+            &loaded.anime,
+            loaded.entries.into_values(),
+            Timestamp::now(),
+        );
+        match result {
+            Ok((merged, events)) => {
+                self.emit(events, cx);
+                let service = self.service_name();
+                self.set_status(
+                    format!(
+                        "Uploading to {service}: {} new, {} updated.",
+                        merged.added, merged.updated
+                    ),
+                    cx,
+                );
+                merged.added + merged.updated > 0
+            }
+            Err(error) => {
+                self.apply(Err(error), cx);
+                false
             }
         }
     }
@@ -333,12 +388,20 @@ fn to_local(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
 
 /// Moves the list from Settings, after asking.
 pub fn change(model: &Entity<Model>, to: ListLocation, window: &mut Window, cx: &mut App) {
-    let (current, has_local, service) = {
+    let (current, has_local, service, count, signed_in) = {
         let model = model.read(cx);
+        let count = model
+            .state()
+            .entries
+            .values()
+            .filter(|e| is_in_list(Some(e)))
+            .count();
         (
             model.state().settings.list,
             model.startup.has_local_list(),
             model.service_name(),
+            count,
+            model.account().token.is_some(),
         )
     };
     if current == Some(to) {
@@ -362,19 +425,80 @@ pub fn change(model: &Entity<Model>, to: ListLocation, window: &mut Window, cx: 
             window,
             cx,
         ),
-        ListLocation::Account => choose(
-            "Use your AniList account?",
-            "The list on this computer is kept, so you can switch back.".into(),
-            vec![(
-                "Use AniList",
+        ListLocation::Account => {
+            let use_account = |upload: bool| -> Run {
+                let model = model.clone();
                 Rc::new(move |_, cx| {
                     model.update(cx, |model, cx| {
-                        model.move_list(ListLocation::Account, false, cx)
+                        model.move_list(ListLocation::Account, false, cx);
+                        if upload {
+                            model.upload_local_list(cx);
+                        }
                     })
-                }),
-            )],
-            window,
-            cx,
-        ),
+                })
+            };
+            let (text, choices) = if count == 0 {
+                (
+                    "The list on this computer is kept, so you can switch back.".to_owned(),
+                    vec![("Use AniList", use_account(false))],
+                )
+            } else if signed_in {
+                (
+                    format!(
+                        "Upload the {count} anime on this computer to {service}? Nothing on \
+                         {service} is removed, and the list on this computer is kept."
+                    ),
+                    vec![
+                        ("Don't upload", use_account(false)),
+                        ("Upload my list", use_account(true)),
+                    ],
+                )
+            } else {
+                (
+                    format!(
+                        "To upload the {count} anime on this computer, sign in to {service} \
+                         first; Settings then offers to upload them. The list on this \
+                         computer is kept."
+                    ),
+                    vec![("Use AniList", use_account(false))],
+                )
+            };
+            choose("Use your AniList account?", text, choices, window, cx);
+        }
     }
+}
+
+/// Uploads the list on this computer from Settings, after asking.
+pub fn ask_upload(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
+    let (count, service) = {
+        let model = model.read(cx);
+        let count = model.startup.load_local_list().map_or(0, |loaded| {
+            loaded
+                .entries
+                .values()
+                .filter(|e| is_in_list(Some(e)))
+                .count()
+        });
+        (count, model.service_name())
+    };
+    if count == 0 {
+        model.update(cx, |model, cx| {
+            model.set_status("The list on this computer is empty.", cx)
+        });
+        return;
+    }
+    let model = model.clone();
+    choose(
+        "Upload the list from this computer?",
+        format!(
+            "{count} anime are added to {service}, or updated where yours are further along. \
+             Nothing on {service} is removed."
+        ),
+        vec![(
+            "Upload",
+            Rc::new(move |_, cx| model.update(cx, |model, cx| model.upload_local_list(cx))),
+        )],
+        window,
+        cx,
+    );
 }
