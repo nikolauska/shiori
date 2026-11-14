@@ -6,7 +6,10 @@ use std::rc::Rc;
 use gpui::{App, Context, Entity, ParentElement as _, Styled as _, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{WindowExt as _, h_flex};
+use std::path::PathBuf;
+
 use jiff::Timestamp;
+use shiori_app::backup;
 use shiori_app::refresh::anime_to_refresh;
 use shiori_app::state::AppEvent;
 use shiori_core::AnimeId;
@@ -37,19 +40,12 @@ impl Model {
             self.set_error(format!("Could not open the list: {error:#}"), cx);
             return;
         }
-        // Everything below was about anime in the list that was just closed.
-        self.selected = None;
-        self.tracker.suggestion = None;
-        if let Some(media) = self.tracker.media.clone() {
-            self.media_found(Some(media), cx);
-        }
-        self.recognize_library_again(cx);
-        self.emit(vec![AppEvent::ListReplaced, AppEvent::SettingsChanged], cx);
+        self.list_replaced(cx);
         let service = self.service_name();
         match to {
             ListLocation::Local => {
                 self.set_status("Your list is now kept on this computer.", cx);
-                self.refresh_anime_data(false, cx);
+                self.local_upkeep(cx);
             }
             ListLocation::Account => {
                 self.set_status(format!("Using your {service} list."), cx);
@@ -62,6 +58,80 @@ impl Model {
 }
 
 impl Model {
+    /// Everything that was about anime in the list just closed or replaced.
+    fn list_replaced(&mut self, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.tracker.suggestion = None;
+        if let Some(media) = self.tracker.media.clone() {
+            self.media_found(Some(media), cx);
+        }
+        self.recognize_library_again(cx);
+        self.emit(vec![AppEvent::ListReplaced, AppEvent::SettingsChanged], cx);
+    }
+
+    /// What a local list needs now and then, in place of synchronizing:
+    /// fresh anime data, and a weekly backup.
+    pub fn local_upkeep(&mut self, cx: &mut Context<Self>) {
+        if !self.state().is_local() {
+            return;
+        }
+        self.refresh_anime_data(false, cx);
+        if !self.state().settings.backup_weekly {
+            return;
+        }
+        let dir = self.startup.folders.backups();
+        let today = jiff::Zoned::now().date();
+        match backup::back_up_weekly(self.state(), &dir, today) {
+            Ok(Some(path)) => {
+                tracing::info!("Backed up the list to {}", path.display());
+                self.last_backup = Some(today);
+                cx.notify();
+            }
+            Ok(None) => {}
+            // Unlike a failed refresh this matters: the backup is the only
+            // other copy of the list.
+            Err(error) => {
+                tracing::error!("Could not back up the list: {error:#}");
+                self.set_error(format!("Could not back up your list: {error:#}"), cx);
+            }
+        }
+    }
+
+    /// Saves a backup where the user chose.
+    pub fn back_up_to(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        match self.startup.state.back_up(&path) {
+            Ok(()) => self.set_status(format!("Backed up your list to {}.", path.display()), cx),
+            Err(error) => {
+                tracing::error!("Could not back up to {}: {error:#}", path.display());
+                self.set_error(format!("Could not back up your list: {error:#}"), cx);
+            }
+        }
+    }
+
+    /// Replaces the local list with a backup. The list as it was is saved
+    /// first, so restoring the wrong file can be undone.
+    pub fn restore(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !self.state().is_local() {
+            return;
+        }
+        let saved = backup::before_restore(&self.startup.folders.backups());
+        if let Err(error) = self.state().back_up(&saved) {
+            tracing::error!("Could not save the list before restoring: {error:#}");
+            self.set_error(format!("Could not save your list first: {error:#}"), cx);
+            return;
+        }
+        match self.startup.state.restore(&path) {
+            Ok(()) => {
+                self.list_replaced(cx);
+                self.set_status(format!("Restored your list from {}.", path.display()), cx);
+            }
+            Err(error) => {
+                tracing::error!("Could not restore {}: {error:#}", path.display());
+                self.set_error(format!("Could not restore: {error:#}"), cx);
+            }
+        }
+    }
+
     /// Fetches the list's followed anime again, 50 to a request. `asked`
     /// is the user's "Refresh anime data": every followed anime is fetched
     /// and the outcome is shown. Otherwise only stale ones are, quietly,
@@ -126,6 +196,21 @@ impl Model {
                 }
             },
         );
+    }
+}
+
+/// When the newest automatic backup was made, for Settings and the sidebar.
+pub fn backed_up(last: Option<jiff::civil::Date>) -> String {
+    let Some(last) = last else {
+        return "Not backed up yet".to_owned();
+    };
+    let today = jiff::Zoned::now().date();
+    if last == today {
+        "Backed up today".to_owned()
+    } else if last.tomorrow().ok() == Some(today) {
+        "Backed up yesterday".to_owned()
+    } else {
+        format!("Backed up {}", last.strftime("%-d %b %Y"))
     }
 }
 

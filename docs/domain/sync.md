@@ -15,6 +15,12 @@ A list on this computer:
 - Still gets anime information (titles, episodes, airing times, posters) from AniList, the same way searching does. Those requests carry anime ids or search words, nothing about you.
 - Keeps that information fresh by itself: on start and every hour, Shiori asks AniList again about the anime you are watching or planning to watch and anything still airing, up to 50 at a time. An airing anime is asked about at most once an hour, a finished one at most once a week. "Refresh anime data" (where "Synchronize" is with an account) asks about all of them right away.
 
+### Backups
+
+Without an account, the list on your computer is the only copy, so Shiori backs it up once a week into the `backups` folder next to its database and keeps the last 4. The sidebar and Settings show when the last backup was made. In Settings you can also back up to a file of your choice at any time, turn the weekly backup off, or restore a backup.
+
+Restoring replaces your whole list (entries, history, per-anime settings, title links and episode numbering) with the backup's. Shiori asks first, and saves the list as it was to `backups/before-restore.sqlite`, so restoring the wrong file can be undone. Files that are not Shiori backups, or that come from a newer Shiori, are refused and change nothing.
+
 It is kept apart from your AniList list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens your AniList list as you left it, and the list on this computer stays, so you can switch back.
 
 ## Signing in

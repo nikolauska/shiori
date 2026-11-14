@@ -359,3 +359,40 @@ fn a_local_copy_leaves_out_the_queue_and_waiting_removals() {
     // The original is untouched.
     assert_eq!(db.load_all().unwrap().queue.len(), 1);
 }
+
+#[test]
+fn a_backup_restores_everything_and_other_files_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = Database::open(&dir.path().join("local.sqlite")).unwrap();
+    db.upsert_anime(&[full_anime(1)]).unwrap();
+    let entry = ListEntry {
+        pending_delete: false,
+        ..full_entry(1)
+    };
+    db.upsert_entries(std::slice::from_ref(&entry)).unwrap();
+    db.add_history(AnimeId(1), 12, ts(100)).unwrap();
+
+    let backup = dir.path().join("backup.sqlite");
+    db.backup_to(&backup).unwrap();
+    // Replacing an earlier backup works too.
+    db.backup_to(&backup).unwrap();
+
+    db.delete_entry(AnimeId(1)).unwrap();
+    db.clear_history().unwrap();
+    db.restore_from(&backup).unwrap();
+    let restored = db.load_all().unwrap();
+    assert_eq!(restored.entries.into_values().collect::<Vec<_>>(), [entry]);
+    assert_eq!(restored.history.len(), 1);
+
+    let text = dir.path().join("notes.txt");
+    std::fs::write(&text, "not a database").unwrap();
+    assert!(db.restore_from(&text).is_err());
+    let other = dir.path().join("other.sqlite");
+    rusqlite::Connection::open(&other)
+        .unwrap()
+        .execute_batch("CREATE TABLE x (y INTEGER)")
+        .unwrap();
+    assert!(db.restore_from(&other).is_err());
+    // A refused file changes nothing.
+    assert_eq!(db.load_all().unwrap().entries.len(), 1);
+}

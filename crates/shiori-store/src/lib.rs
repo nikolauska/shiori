@@ -26,6 +26,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("keychain error: {0}")]
     Secrets(String),
+    #[error("{0}")]
+    NotABackup(&'static str),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -173,9 +173,11 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
             });
             return;
         }
-        // Start-up sync, when there is an account to sync with.
+        // Start-up sync, when there is an account to sync with. A local
+        // list's start-up refresh runs quietly from start_refreshing; going
+        // through Synchronize would make it the loud, everything-at-once one.
         model.update(cx, |model, cx| {
-            if model.state().settings.sync_enabled {
+            if model.state().settings.sync_enabled && !model.state().is_local() {
                 model.synchronize(cx);
             }
         });
@@ -297,15 +299,14 @@ pub fn geometry_of(window: &Window) -> WindowGeometry {
 /// Starts detection, and shows its state in the tray and asks for
 /// confirmations with a desktop notification.
 /// A local list's anime are refreshed on start and then every hour; only
-/// stale ones are fetched, so most rounds ask about a few airing anime.
+/// stale ones are fetched, so most rounds ask about a few airing anime. The
+/// weekly backup is checked at the same times.
 fn start_refreshing(model: &Entity<Model>, cx: &mut App) {
     let model = model.downgrade();
     cx.spawn(async move |cx| {
         loop {
             let alive = model.update(cx, |model, cx| {
-                if model.state().is_local() {
-                    model.refresh_anime_data(false, cx);
-                }
+                model.local_upkeep(cx);
             });
             if alive.is_err() {
                 break;

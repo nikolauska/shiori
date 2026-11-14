@@ -335,7 +335,10 @@ impl MainWindow {
         let account = &state.accounts.anilist;
         let local = state.is_local();
         let (who, how) = if local {
-            ("On this computer".to_owned(), "Local list".to_owned())
+            (
+                "On this computer".to_owned(),
+                super::list_location::backed_up(self.model.read(cx).last_backup),
+            )
         } else if account.username.is_empty() {
             (
                 "Not signed in".to_owned(),

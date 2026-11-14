@@ -63,23 +63,49 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db: Database, settings: Settings, accounts: Accounts) -> Result<Self> {
-        let loaded = db.load_all()?;
-        let title_index =
-            TitleIndex::build(loaded.anime.values(), |id| loaded.anime_settings.get(&id));
-        Ok(Self {
+        let mut state = Self {
             service: settings.service,
             db,
-            anime: loaded.anime,
-            entries: loaded.entries,
-            anime_settings: loaded.anime_settings,
-            history: loaded.history,
-            queue: SyncQueue::new(loaded.queue),
-            title_index,
-            numbering: Numbering::new(loaded.numbering),
+            anime: BTreeMap::new(),
+            entries: BTreeMap::new(),
+            anime_settings: BTreeMap::new(),
+            history: Vec::new(),
+            queue: SyncQueue::new(Vec::new()),
+            title_index: TitleIndex::default(),
+            numbering: Numbering::default(),
             settings,
             accounts,
             signed_in: false,
-        })
+        };
+        state.load()?;
+        Ok(state)
+    }
+
+    /// Reads everything from the database again.
+    fn load(&mut self) -> Result<()> {
+        let loaded = self.db.load_all()?;
+        self.title_index =
+            TitleIndex::build(loaded.anime.values(), |id| loaded.anime_settings.get(&id));
+        self.anime = loaded.anime;
+        self.entries = loaded.entries;
+        self.anime_settings = loaded.anime_settings;
+        self.history = loaded.history;
+        self.queue = SyncQueue::new(loaded.queue);
+        self.numbering = Numbering::new(loaded.numbering);
+        Ok(())
+    }
+
+    /// Writes everything to `path`.
+    pub fn back_up(&self, path: &std::path::Path) -> Result<()> {
+        self.db.backup_to(path)?;
+        Ok(())
+    }
+
+    /// Replaces everything with the backup at `path`. A file that is not a
+    /// backup changes nothing.
+    pub fn restore(&mut self, path: &std::path::Path) -> Result<()> {
+        self.db.restore_from(path)?;
+        self.load()
     }
 
     /// The list lives on this computer only: nothing is queued or sent.
@@ -491,6 +517,30 @@ mod tests {
         assert!(state.entries.is_empty());
         assert!(state.stored().entries.is_empty());
         assert!(state.stored().queue.is_empty());
+    }
+
+    #[test]
+    fn restoring_a_backup_reloads_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = state();
+        let mut anime = Anime::new(AnimeId(1));
+        anime.titles.romaji = "Sousou no Frieren".into();
+        state.store_anime(vec![anime]).unwrap();
+        let mut entry = ListEntry::new(AnimeId(1));
+        entry.watched_episodes = 3;
+        state.save_entry(entry, Timestamp::UNIX_EPOCH).unwrap();
+        let backup = dir.path().join("backup.sqlite");
+        state.back_up(&backup).unwrap();
+
+        state
+            .remove_entry(AnimeId(1), Timestamp::UNIX_EPOCH)
+            .unwrap();
+        state.store_anime(vec![Anime::new(AnimeId(2))]).unwrap();
+        state.restore(&backup).unwrap();
+        assert_eq!(state.entries[&AnimeId(1)].watched_episodes, 3);
+        assert!(!state.anime.contains_key(&AnimeId(2)));
+        // Recognition sees the restored titles.
+        assert!(!state.title_index.lookup("sousou no frieren").is_empty());
     }
 
     #[test]

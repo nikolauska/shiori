@@ -51,6 +51,8 @@ pub struct Settings {
     /// `None` until the user has chosen; Shiori asks on start until then.
     pub list: Option<ListLocation>,
     pub sync_enabled: bool,
+    /// Back up a local list every week.
+    pub backup_weekly: bool,
     pub library_folders: Vec<PathBuf>,
     pub title_language: TitleLanguage,
     pub detection_enabled: bool,
@@ -77,6 +79,7 @@ impl Default for Settings {
             service: ServiceId::AniList,
             list: None,
             sync_enabled: true,
+            backup_weekly: true,
             library_folders: Vec::new(),
             title_language: TitleLanguage::Romaji,
             detection_enabled: true,
@@ -166,6 +169,7 @@ fn read(doc: &DocumentMut) -> Settings {
             _ => d.list,
         },
         sync_enabled: bool_at("sync.enabled", d.sync_enabled),
+        backup_weekly: bool_at("backup.weekly", d.backup_weekly),
         library_folders: list_at("library.folders")
             .into_iter()
             .map(PathBuf::from)
@@ -236,6 +240,7 @@ fn write(doc: &mut DocumentMut, s: &Settings) {
         }),
     );
     set("sync.enabled", Some(s.sync_enabled.into()));
+    set("backup.weekly", Some(s.backup_weekly.into()));
     set(
         "library.folders",
         Some(list(
@@ -369,6 +374,7 @@ mod tests {
             service: ServiceId::Kitsu,
             list: Some(ListLocation::Local),
             sync_enabled: false,
+            backup_weekly: false,
             library_folders: vec!["/media/anime".into(), "D:\\Anime".into()],
             title_language: TitleLanguage::Native,
             detection_enabled: false,

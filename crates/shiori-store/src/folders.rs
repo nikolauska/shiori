@@ -93,6 +93,11 @@ impl Folders {
         self.data.join("local.sqlite")
     }
 
+    /// Automatic backups of the local list.
+    pub fn backups(&self) -> PathBuf {
+        self.data.join("backups")
+    }
+
     pub fn logs(&self) -> PathBuf {
         self.data.join("logs")
     }

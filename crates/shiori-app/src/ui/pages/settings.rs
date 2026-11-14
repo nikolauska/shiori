@@ -243,6 +243,51 @@ impl SettingsView {
         true
     }
 
+    fn back_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let name = format!("shiori-backup-{}.sqlite", jiff::Zoned::now().date());
+        let path = cx.prompt_for_new_path(&home, Some(&name));
+        let model = self.model.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(path))) = path.await {
+                model.update(cx, |model, cx| model.back_up_to(path, cx));
+            }
+        })
+        .detach();
+    }
+
+    fn restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Restore".into()),
+        });
+        let model = self.model.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let Ok(Ok(Some(mut paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.pop() else {
+                return;
+            };
+            let _ = cx.update(|window, cx| {
+                actions::confirm(
+                    "Restore this backup?",
+                    "It replaces your current list, which is saved first so you can go back."
+                        .to_owned(),
+                    window,
+                    cx,
+                    move |cx| model.update(cx, |model, cx| model.restore(path.clone(), cx)),
+                );
+            });
+        })
+        .detach();
+    }
+
     fn sign_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let token = self.token.read(cx).value().trim().to_owned();
         if token.is_empty() {
@@ -457,6 +502,7 @@ impl SettingsView {
                     None => model.has_account().then_some(1),
                 };
                 let local = state.is_local();
+                let last_backup = list_location::backed_up(model.last_backup);
                 let handle = self.model.clone();
                 let location = RadioGroup::vertical("list-location")
                     .child(Radio::new("local").label("On this computer"))
@@ -474,6 +520,27 @@ impl SettingsView {
                     .gap_3()
                     .child(label("Where your list lives"))
                     .child(location)
+                    .when(local, |el| {
+                        el.child(label("Backup"))
+                            .child(div().child(last_backup))
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(Button::new("back-up").label("Back up now...").on_click(
+                                        cx.listener(|this, _, window, cx| this.back_up(window, cx)),
+                                    ))
+                                    .child(Button::new("restore").label("Restore...").on_click(
+                                        cx.listener(|this, _, window, cx| this.restore(window, cx)),
+                                    )),
+                            )
+                            .child(self.checkbox(
+                                "backup-weekly",
+                                "Back up every week (the last 4 are kept)",
+                                d.backup_weekly,
+                                |s, v| s.backup_weekly = v,
+                                cx,
+                            ))
+                    })
                     // Syncing and signing in mean nothing for a local list.
                     .when(!local, |el| {
                         el.child(self.checkbox(

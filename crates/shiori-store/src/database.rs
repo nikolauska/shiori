@@ -4,14 +4,14 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use jiff::Timestamp;
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, params};
 use shiori_core::recognition::{NumberingSequence, SequenceEntry};
 use shiori_core::{
     AgeRating, AiringStatus, Anime, AnimeId, AnimeSettings, AnimeType, Fields, FuzzyDate,
     HistoryItem, ListEntry, ListEntryId, ListStatus, QueueItem, Titles,
 };
 
-use crate::Result;
+use crate::{Error, Result};
 
 /// Schema changes in order. The position in this list plus one is the
 /// version stored in `PRAGMA user_version`; never edit an entry once
@@ -99,6 +99,56 @@ impl Database {
         tx.execute("DELETE FROM anime_list WHERE pending_delete", [])?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Writes a consistent copy of everything to `path`, replacing it.
+    pub fn backup_to(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // VACUUM INTO refuses an existing file, and writing beside it first
+        // means a failed backup never leaves a broken file in its place.
+        let partial = path.with_extension("partial");
+        let _ = std::fs::remove_file(&partial);
+        self.conn
+            .execute("VACUUM INTO ?1", [partial.to_string_lossy().as_ref()])?;
+        std::fs::rename(&partial, path)?;
+        Ok(())
+    }
+
+    /// Replaces everything with the backup at `path`, after checking that
+    /// it is a Shiori database this version can read. The file itself is
+    /// only read.
+    pub fn restore_from(&mut self, path: &Path) -> Result<()> {
+        {
+            let source = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let version: i64 = source
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(|_| Error::NotABackup("This file is not a Shiori backup."))?;
+            let tables: i64 = source
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master
+                     WHERE type = 'table' AND name IN ('anime', 'anime_list', 'history')",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| Error::NotABackup("This file is not a Shiori backup."))?;
+            if tables != 3 || version < 1 {
+                return Err(Error::NotABackup("This file is not a Shiori backup."));
+            }
+            if usize::try_from(version).unwrap_or(usize::MAX) > MIGRATIONS.len() {
+                return Err(Error::NotABackup(
+                    "This backup is from a newer Shiori. Update Shiori to restore it.",
+                ));
+            }
+        }
+        self.conn.restore(
+            rusqlite::MAIN_DB,
+            path,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
+        // A backup made by an older Shiori is brought up to date.
+        self.migrate()
     }
 
     pub fn schema_version(&self) -> Result<usize> {

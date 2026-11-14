@@ -46,6 +46,8 @@ pub struct Model {
     pub(super) syncing: bool,
     /// Anime data is being refreshed for a local list; a second start waits.
     pub(super) refreshing: bool,
+    /// The day of the newest automatic backup of a local list.
+    pub last_backup: Option<jiff::civil::Date>,
     pub posters: Posters,
     pub session: Session,
     /// A session write is scheduled.
@@ -91,6 +93,7 @@ impl Model {
             tracing::warn!("Could not read the session: {error:#}");
             Session::default()
         });
+        let last_backup = shiori_app::backup::latest(&startup.folders.backups());
         Ok(Self {
             startup,
             service,
@@ -99,6 +102,7 @@ impl Model {
             status: Status::default(),
             syncing: false,
             refreshing: false,
+            last_backup,
             posters: Posters::default(),
             session,
             session_save: None,
