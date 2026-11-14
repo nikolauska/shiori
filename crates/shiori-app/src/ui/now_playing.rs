@@ -15,7 +15,7 @@ use shiori_core::{AnimeId, ElementKind, Phase, Reason};
 use shiori_app::tracking::{Media, Source, update_settings};
 
 use super::model::Model;
-use super::{poster, style};
+use super::{link_picker, poster, style};
 
 /// The anime the playing media is identified as, if any.
 pub fn playing_anime(model: &Model) -> Option<AnimeId> {
@@ -44,9 +44,7 @@ fn update(model: &Model, media: &Media) -> Update {
         buttons: &[],
     };
     match state.phase {
-        Phase::Idle if media.episode.anime_id.is_none() => {
-            plain("Right-click the anime in your list and pick Set as now playing.")
-        }
+        Phase::Idle if media.episode.anime_id.is_none() => plain(""),
         Phase::Idle => plain(""),
         Phase::Denied => plain(match state.reason {
             Reason::OutsideLibrary => "Not updating: outside the library folders",
@@ -54,6 +52,10 @@ fn update(model: &Model, media: &Media) -> Update {
             Reason::AlreadyWatched => "Already watched",
             Reason::None | Reason::SkipsAhead => "Not updating",
         }),
+        // Shown over the countdown, which stands still until a pick is made.
+        Phase::Countdown | Phase::WaitingForClose if model.tracker.is_held() => {
+            plain("Waiting while you pick an anime")
+        }
         Phase::Countdown => {
             let delay = update_settings(&model.state().settings).delay;
             Update {
@@ -287,6 +289,53 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
             el.child(countdown_bar(progress, 96., cx))
         });
 
+    // Not recognized: the likely answers as one-click chips, then the
+    // picker. Recognized: a way to say it is the wrong anime, plainer when
+    // the update is denied, which is when a wrong match usually shows.
+    let suggestions: Vec<(AnimeId, String)> = if id.is_none() {
+        let m = model.read(cx);
+        m.tracker
+            .suggestions
+            .iter()
+            .take(2)
+            .map(|&s| (s, m.state().title(s)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let denied = model.read(cx).tracker.state().phase == Phase::Denied;
+    let chips = suggestions
+        .into_iter()
+        .enumerate()
+        .map(|(ix, (anime, title))| {
+            let model = model.clone();
+            Button::new(("suggestion", ix))
+                .xsmall()
+                .outline()
+                .label(title)
+                .tooltip("Link and remember")
+                .on_click(move |_, _, cx| {
+                    model.update(cx, |model, cx| model.set_now_playing(anime, cx))
+                })
+        });
+    let link = {
+        let model = model.clone();
+        let (label, tooltip) = match (id, denied) {
+            (None, _) => ("Link anime…", "Tell Shiori which anime this is"),
+            (Some(_), true) => ("Wrong anime?", "Link it to another anime"),
+            (Some(_), false) => ("Change…", "Link it to another anime"),
+        };
+        Button::new("link-anime")
+            .xsmall()
+            .when(id.is_none(), |b| b.primary())
+            .when(id.is_some(), |b| b.ghost())
+            .label(label)
+            .tooltip(tooltip)
+            .on_click(move |_, window, cx| {
+                link_picker::open(&model, link_picker::Target::NowPlaying, window, cx)
+            })
+    };
+
     Some(
         h_flex()
             .flex_1()
@@ -294,7 +343,12 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
             .gap_3()
             .child(what)
             .child(status)
+            .when(id.is_none(), |el| {
+                el.child(div().flex_none().text_color(muted).child("Is it"))
+            })
+            .children(chips)
             .children(buttons(model, &update))
+            .child(link)
             .into_any_element(),
     )
 }
@@ -504,7 +558,22 @@ pub fn tab(model: &Entity<Model>, id: AnimeId, cx: &App) -> AnyElement {
                     .bg(cx.theme().muted)
                     .text_xs()
                     .child(div().text_color(muted).child("Matched because"))
-                    .child(div().child(because)),
+                    .child(div().child(because))
+                    .child(div().child({
+                        let model = model.clone();
+                        Button::new("wrong-anime")
+                            .xsmall()
+                            .link()
+                            .label("Wrong anime? Link another…")
+                            .on_click(move |_, window, cx| {
+                                link_picker::open(
+                                    &model,
+                                    link_picker::Target::NowPlaying,
+                                    window,
+                                    cx,
+                                )
+                            })
+                    })),
             )
         })
         .child(

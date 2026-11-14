@@ -4,10 +4,13 @@
 
 use std::path::{Path, PathBuf};
 
+use shiori_core::entry::is_in_list;
 use shiori_core::recognition::{
-    MatchReason, ParseOptions, Relations, identify_with_reason, parse, parse_path,
+    MatchReason, ParseOptions, Relations, close_matches, identify_with_reason, parse, parse_path,
 };
-use shiori_core::{Anime, AnimeId, Episode, ListEntry, Lookup, UpdateSettings};
+use shiori_core::{
+    Anime, AnimeId, ElementKind, Episode, ListEntry, ListStatus, Lookup, UpdateSettings,
+};
 use shiori_detect::{Detected, MediaInfoKind, Player, PlayerType, WindowId};
 use shiori_store::{Folders, Settings};
 
@@ -56,6 +59,9 @@ pub struct Media {
     pub url: Option<String>,
     /// Parsed; `anime_id` is set once identified.
     pub episode: Episode,
+    /// As parsed, before identification, which can rewrite the episode
+    /// numbers; identifying again starts from this.
+    pub parsed: Episode,
     /// Why `episode.anime_id` is what it is; `None` while not identified.
     pub matched: Option<MatchReason>,
 }
@@ -119,6 +125,7 @@ pub fn choose_media(
         key: PlayerKey::of(detected),
         source,
         url,
+        parsed: episode.clone(),
         episode,
         matched: None,
     })
@@ -126,6 +133,7 @@ pub fn choose_media(
 
 /// Identifies the episode in place against the list and the database.
 pub fn identify_media(media: &mut Media, state: &AppState, relations: &Relations) {
+    media.episode = media.parsed.clone();
     media.matched = identify_with_reason(
         &mut media.episode,
         &state.title_index,
@@ -133,6 +141,55 @@ pub fn identify_media(media: &mut Media, state: &AppState, relations: &Relations
         relations,
     )
     .map(|(_, reason)| reason);
+}
+
+/// Anime whose titles are close to the episode's title, best first: the
+/// likely answers when it matched nothing. Watching entries go first among
+/// equals, since that is what the user is most likely playing.
+pub fn suggestions(state: &AppState, episode: &Episode, limit: usize) -> Vec<AnimeId> {
+    let Some(title) = episode.title() else {
+        return Vec::new();
+    };
+    let season = episode
+        .get(ElementKind::Season)
+        .and_then(|s| s.trim().parse().ok());
+    close_anime(state, title, season, limit)
+}
+
+/// Anime with titles close to `title`, best first; see `suggestions`.
+pub fn close_anime(
+    state: &AppState,
+    title: &str,
+    season: Option<u32>,
+    limit: usize,
+) -> Vec<AnimeId> {
+    let titles = state.anime.values().flat_map(|anime| {
+        let t = &anime.titles;
+        let own = state
+            .anime_settings
+            .get(&anime.id)
+            .into_iter()
+            .flat_map(|s| s.synonyms.iter());
+        [&t.romaji, &t.english, &t.japanese]
+            .into_iter()
+            .chain(t.synonyms.iter())
+            .chain(own)
+            .map(move |title| (anime.id, title.as_str()))
+    });
+    let mut found = close_matches(title, season, titles, limit * 4);
+    let watching = |id: &AnimeId| {
+        state
+            .entries
+            .get(id)
+            .is_some_and(|e| is_in_list(Some(e)) && e.status == ListStatus::Watching)
+    };
+    for (id, score) in &mut found {
+        if watching(id) {
+            *score += 0.05;
+        }
+    }
+    found.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    found.into_iter().take(limit).map(|(id, _)| id).collect()
 }
 
 /// Whether the file is outside every library folder while the settings

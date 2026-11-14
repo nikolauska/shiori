@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use gpui::{AppContext as _, Context, Task};
+use shiori_core::recognition::{normalize, title_to_remember};
 use shiori_core::{AnimeId, Episode, ListStatus};
 use shiori_library::{
     Node, Recognizer, can_start_rewatch, find_anime_folder, find_episode, find_episodes,
@@ -55,6 +56,30 @@ impl Model {
             relations: self.tracker.relations.clone(),
             library_folders: state.settings.library_folders.clone(),
         }
+    }
+
+    /// Recognizes again the library files titled `title`, after the user
+    /// linked that title to an anime. Only those can change, and they are
+    /// few, so this runs at once instead of rescanning.
+    pub(super) fn recognize_library_title(&mut self, title: &str, cx: &mut Context<Self>) {
+        let key = normalize(title);
+        let paths: Vec<PathBuf> = self
+            .library
+            .recognized
+            .iter()
+            .filter(|(_, e)| title_to_remember(e).is_some_and(|t| normalize(&t) == key))
+            .map(|(path, _)| path.clone())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        let recognizer = self.recognizer();
+        for path in paths {
+            if let Some(episode) = recognizer.file(&path) {
+                self.library.recognized.insert(path, episode);
+            }
+        }
+        cx.notify();
     }
 
     /// The anime's own folder from its settings, when set, then the library

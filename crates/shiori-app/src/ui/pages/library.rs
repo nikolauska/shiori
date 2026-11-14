@@ -21,7 +21,7 @@ use shiori_core::Episode;
 use shiori_library::{Node, NodeKind};
 
 use crate::ui::model::Model;
-use crate::ui::{actions, inspector};
+use crate::ui::{actions, inspector, link_picker};
 
 gpui::actions!(library, [OpenItem, RenameItem, DeleteItem]);
 
@@ -205,6 +205,9 @@ impl TableDelegate for LibraryDelegate {
             return menu;
         };
         let anime_id = self.episode(&row, cx).and_then(|e| e.anime_id);
+        // A video file that was read but matched nothing.
+        let unrecognized = self.episode(&row, cx).is_some_and(|e| e.anime_id.is_none());
+        let path = row.path.clone();
         let page = self.page.clone();
         let call = move |f: fn(&mut LibraryPage, Row, &mut Window, &mut Context<LibraryPage>)| {
             let page = page.clone();
@@ -214,6 +217,14 @@ impl TableDelegate for LibraryDelegate {
             }
         };
         let mut menu = menu.item(PopupMenuItem::new("Open").on_click(call(LibraryPage::open)));
+        if unrecognized {
+            let model = self.model.clone();
+            menu = menu.item(PopupMenuItem::new("Link to anime...").on_click(
+                move |_, window, cx| {
+                    link_picker::open(&model, link_picker::Target::File(path.clone()), window, cx)
+                },
+            ));
+        }
         if let Some(id) = anime_id {
             let model = self.model.clone();
             menu = menu.item(

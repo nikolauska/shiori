@@ -16,7 +16,9 @@ pub mod tracking;
 
 pub use anime::{AgeRating, AiringStatus, Anime, AnimeId, AnimeType, TitleLanguage, Titles};
 pub use date::{FuzzyDate, Season, SeasonName};
-pub use entry::{AnimeSettings, Fields, HistoryItem, ListEntry, ListEntryId, ListStatus};
+pub use entry::{
+    AnimeSettings, Fields, HistoryItem, LinkedTitle, ListEntry, ListEntryId, ListStatus,
+};
 pub use episode::{Element, ElementKind, Episode};
 pub use queue::QueueItem;
 pub use search::{SearchParams, SearchSort};

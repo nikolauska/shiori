@@ -63,13 +63,36 @@ fn schema_is_created_once() {
     let path = dir.path().join("data/anilist.sqlite");
     {
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 1);
+        assert_eq!(db.schema_version().unwrap(), 2);
         db.upsert_anime(&[full_anime(1)]).unwrap();
     }
     // Reopening keeps the data and does not run the migration again.
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 1);
+    assert_eq!(db.schema_version().unwrap(), 2);
     assert_eq!(db.load_all().unwrap().anime.len(), 1);
+}
+
+#[test]
+fn a_first_version_file_gains_linked_titles_and_keeps_its_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("anilist.sqlite");
+    {
+        // A file as the first release wrote it.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(include_str!("../src/sql/001_create.sql"))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO anime_settings (id, synonyms) VALUES (5, '[\"One\"]')",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let db = Database::open(&path).unwrap();
+    assert_eq!(db.schema_version().unwrap(), 2);
+    let settings = &db.load_all().unwrap().anime_settings[&AnimeId(5)];
+    assert_eq!(settings.synonyms, ["One"]);
+    assert!(settings.linked.is_empty());
 }
 
 #[test]
@@ -186,6 +209,10 @@ fn anime_settings_round_trip() {
         display_title: "Shown".into(),
         folder: "/media/anime/Show".into(),
         synonyms: vec!["One".into(), "Two".into()],
+        linked: vec![LinkedTitle {
+            title: "Two".into(),
+            date: FuzzyDate::new(2026, 11, 14),
+        }],
     };
     db.upsert_anime_settings(&s).unwrap();
     // No anime with id 5 exists: settings do not depend on it.

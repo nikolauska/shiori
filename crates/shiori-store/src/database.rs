@@ -15,7 +15,10 @@ use crate::Result;
 /// Schema changes in order. The position in this list plus one is the
 /// version stored in `PRAGMA user_version`; never edit an entry once
 /// released, only add new ones.
-const MIGRATIONS: &[&str] = &[include_str!("sql/001_create.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("sql/001_create.sql"),
+    include_str!("sql/002_linked_titles.sql"),
+];
 
 /// Everything loaded at start.
 #[derive(Debug, Default)]
@@ -294,12 +297,18 @@ impl Database {
 
     pub fn upsert_anime_settings(&self, s: &AnimeSettings) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO anime_settings (id, display_title, folder, synonyms)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO anime_settings (id, display_title, folder, synonyms, linked)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (id) DO UPDATE SET
                 display_title = excluded.display_title, folder = excluded.folder,
-                synonyms = excluded.synonyms",
-            params![s.id.0, s.display_title, s.folder, json(&s.synonyms)],
+                synonyms = excluded.synonyms, linked = excluded.linked",
+            params![
+                s.id.0,
+                s.display_title,
+                s.folder,
+                json(&s.synonyms),
+                json(&s.linked)
+            ],
         )?;
         Ok(())
     }
@@ -307,13 +316,14 @@ impl Database {
     fn load_anime_settings(&self) -> Result<BTreeMap<AnimeId, AnimeSettings>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, display_title, folder, synonyms FROM anime_settings")?;
+            .prepare("SELECT id, display_title, folder, synonyms, linked FROM anime_settings")?;
         let rows = stmt.query_map([], |row| {
             Ok(AnimeSettings {
                 id: AnimeId(row.get(0)?),
                 display_title: row.get(1)?,
                 folder: row.get(2)?,
                 synonyms: from_json(&row.get::<_, String>(3)?),
+                linked: from_json(&row.get::<_, String>(4)?),
             })
         })?;
         let mut map = BTreeMap::new();
@@ -424,13 +434,13 @@ fn queue_item(row: &Row<'_>) -> rusqlite::Result<QueueItem> {
     })
 }
 
-fn json(list: &[String]) -> String {
+fn json<T: serde::Serialize>(list: &[T]) -> String {
     serde_json::to_string(list).unwrap_or_else(|_| "[]".into())
 }
 
 /// A damaged list column is read as empty rather than failing the whole load;
 /// the next fetch from the service rewrites it.
-fn from_json(text: &str) -> Vec<String> {
+fn from_json<T: serde::de::DeserializeOwned>(text: &str) -> Vec<T> {
     serde_json::from_str(text).unwrap_or_else(|error| {
         tracing::warn!("Invalid list in database: {error}");
         Vec::new()

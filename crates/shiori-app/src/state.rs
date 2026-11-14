@@ -10,8 +10,8 @@ use anyhow::Result;
 use jiff::Timestamp;
 use shiori_core::anime::preferred_title;
 use shiori_core::entry::changed_fields;
-use shiori_core::recognition::TitleIndex;
-use shiori_core::{Anime, AnimeId, AnimeSettings, HistoryItem, ListEntry, ServiceId};
+use shiori_core::recognition::{TitleIndex, link_title};
+use shiori_core::{Anime, AnimeId, AnimeSettings, FuzzyDate, HistoryItem, ListEntry, ServiceId};
 use shiori_store::{Accounts, Database, Settings};
 use shiori_sync::queue::{Reconcile, Step};
 use shiori_sync::sync::entries_to_prune;
@@ -330,6 +330,22 @@ impl AppState {
         Ok(vec![AppEvent::AnimeSettingsUpdated(id)])
     }
 
+    /// Remembers `title` as an alternative title of `id`, taking it from any
+    /// other anime it was linked to, so files with that title match `id`
+    /// from now on.
+    pub fn link_title(
+        &mut self,
+        id: AnimeId,
+        title: &str,
+        date: FuzzyDate,
+    ) -> Result<Vec<AppEvent>> {
+        let mut events = Vec::new();
+        for settings in link_title(&self.anime_settings, id, title, date) {
+            events.extend(self.save_anime_settings(settings)?);
+        }
+        Ok(events)
+    }
+
     /// What is in the database, to check that changes were written through.
     #[cfg(test)]
     pub fn stored(&self) -> shiori_store::Loaded {
@@ -431,5 +447,32 @@ mod tests {
         assert_eq!(state.stored().anime_settings[&AnimeId(1)], settings);
         // Saving the same settings again changes nothing.
         assert!(state.save_anime_settings(settings).unwrap().is_empty());
+    }
+
+    #[test]
+    fn linking_a_title_moves_recognition_to_the_new_anime() {
+        let mut state = state();
+        let mut one = Anime::new(AnimeId(1));
+        one.titles.romaji = "Kusuriya no Hitorigoto 2nd Season".into();
+        let mut two = Anime::new(AnimeId(2));
+        two.titles.romaji = "Kusuriya no Hitorigoto 3rd Season".into();
+        state.store_anime(vec![one, two]).unwrap();
+        let date = FuzzyDate::new(2026, 11, 14);
+
+        state.link_title(AnimeId(1), "Kusuriya S3", date).unwrap();
+        assert_eq!(state.title_index.lookup("Kusuriya S3")[0].0, AnimeId(1));
+
+        let events = state.link_title(AnimeId(2), "Kusuriya S3", date).unwrap();
+        assert_eq!(
+            events,
+            [
+                AppEvent::AnimeSettingsUpdated(AnimeId(1)),
+                AppEvent::AnimeSettingsUpdated(AnimeId(2))
+            ]
+        );
+        assert_eq!(state.title_index.lookup("Kusuriya S3"), [(AnimeId(2), 2.0)]);
+        let stored = state.stored().anime_settings;
+        assert!(stored[&AnimeId(1)].synonyms.is_empty());
+        assert_eq!(stored[&AnimeId(2)].linked[0].title, "Kusuriya S3");
     }
 }

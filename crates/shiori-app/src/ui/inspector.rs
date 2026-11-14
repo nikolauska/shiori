@@ -21,6 +21,7 @@ use gpui_component::{
 use jiff::Timestamp;
 use shiori_core::anime::{MAX_EPISODE_COUNT, is_stale};
 use shiori_core::entry::is_in_list;
+use shiori_core::recognition::normalize;
 use shiori_core::{AnimeId, AnimeSettings, FuzzyDate, ListEntry, ListStatus};
 use shiori_sync::anilist::score::rating_list;
 
@@ -470,12 +471,26 @@ impl Inspector {
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .map(str::to_owned)
-            .collect();
+            .collect::<Vec<String>>();
+        // A linked title the user deleted from the box is no longer linked.
+        let mut linked = self
+            .model
+            .read(cx)
+            .state()
+            .anime_settings
+            .get(&id)
+            .map(|s| s.linked.clone())
+            .unwrap_or_default();
+        linked.retain(|l| {
+            let key = normalize(&l.title);
+            synonyms.iter().any(|s: &String| normalize(s) == key)
+        });
         let settings = AnimeSettings {
             id,
             display_title: self.display_title.read(cx).value().trim().to_owned(),
             folder: self.folder.read(cx).value().trim().to_owned(),
             synonyms,
+            linked,
         };
         // Saving unchanged settings is a no-op in AppState.
         self.model
@@ -775,6 +790,30 @@ impl Inspector {
             .into_any_element()
     }
 
+    /// Which alternative titles came from linking a file, so the user can
+    /// tell them from ones typed in and remove one to undo the link.
+    fn linked_titles(&self, cx: &App) -> Option<impl IntoElement> {
+        let id = self.id?;
+        let settings = self.model.read(cx).state().anime_settings.get(&id)?;
+        if settings.linked.is_empty() {
+            return None;
+        }
+        let list = settings
+            .linked
+            .iter()
+            .map(|l| format!("\"{}\" ({})", l.title, format::date_label(l.date)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!(
+                    "Linked from a file: {list}. Delete a line above to undo its link."
+                )),
+        )
+    }
+
     fn render_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         v_flex()
@@ -787,6 +826,7 @@ impl Inspector {
                     .child("Alternative titles, one per line. Used to recognize file names."),
             )
             .child(div().h(px(80.)).child(Textarea::new(&self.synonyms)))
+            .children(self.linked_titles(cx))
             .child(div().text_xs().text_color(muted).child("Folder"))
             .child(
                 h_flex()

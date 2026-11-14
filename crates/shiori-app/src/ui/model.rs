@@ -174,7 +174,7 @@ impl Model {
         cx.notify();
     }
 
-    fn apply(&mut self, result: anyhow::Result<Vec<AppEvent>>, cx: &mut Context<Self>) {
+    pub(super) fn apply(&mut self, result: anyhow::Result<Vec<AppEvent>>, cx: &mut Context<Self>) {
         match result {
             Ok(events) => self.emit(events, cx),
             // A database write failed; the in-memory state may be ahead of

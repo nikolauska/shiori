@@ -118,8 +118,13 @@ pub fn context_menu(
             move |window, cx| inspector::open(&m, id, window, cx)
         }),
     ));
-    // Only while something unrecognized is playing (ui.md).
-    let now_playing = single && model.read(cx).tracker.badge() == Badge::Unidentified;
+    // While something plays that is not this anime: unrecognized, or
+    // recognized as the wrong one (ui.md).
+    let now_playing = single && {
+        let tracker = &model.read(cx).tracker;
+        tracker.badge() != Badge::None
+            && super::now_playing::playing_anime(model.read(cx)) != Some(id)
+    };
     let menu = if now_playing {
         menu.item(item(
             "Set as now playing",

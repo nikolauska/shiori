@@ -6,6 +6,7 @@ mod format;
 mod icons;
 mod inspector;
 mod library;
+mod link_picker;
 mod main_window;
 mod model;
 mod now_playing;

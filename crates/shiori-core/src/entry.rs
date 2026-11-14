@@ -152,6 +152,16 @@ pub struct AnimeSettings {
     pub folder: String,
     /// Extra titles for recognition, with the strongest weight.
     pub synonyms: Vec<String>,
+    /// Which of `synonyms` the user added by linking a file to this anime,
+    /// and when, so the UI can tell them from ones typed in.
+    pub linked: Vec<LinkedTitle>,
+}
+
+/// An alternative title added by linking media to an anime.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedTitle {
+    pub title: String,
+    pub date: FuzzyDate,
 }
 
 impl AnimeSettings {

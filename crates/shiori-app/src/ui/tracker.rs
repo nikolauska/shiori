@@ -3,9 +3,9 @@
 
 use std::time::Duration;
 
-use gpui::{Context, Task};
+use gpui::{AnyWeakEntity, Context, Task};
 use jiff::Zoned;
-use shiori_core::recognition::{MatchReason, Relations};
+use shiori_core::recognition::{MatchReason, Relations, is_generic_title, title_to_remember};
 use shiori_core::{
     AnimeId, Episode, SessionInput, SessionOutput, UpdateSession, UpdateState,
     entry_with_episode_watched,
@@ -15,7 +15,7 @@ use shiori_detect::Player;
 use shiori_app::detection::{self, Report};
 use shiori_app::tracking::{
     Media, PlayerKey, choose_media, identify_media, is_outside_library, load_players,
-    load_relations, update_settings,
+    load_relations, suggestions, update_settings,
 };
 
 use super::model::Model;
@@ -33,10 +33,18 @@ pub struct Tracker {
     session: UpdateSession,
     /// What is playing, identified or not.
     pub media: Option<Media>,
-    /// The anime the user picked with "Set as now playing" for the media
-    /// with these elements. Kept so that the next poll's identification
-    /// does not undo the choice.
+    /// The anime the user picked for this playback only, for the media
+    /// parsed into these elements. Kept so that the next poll's
+    /// identification does not undo the choice.
     manual: Option<(Vec<shiori_core::Element>, AnimeId)>,
+    /// Anime with titles close to the media's, while it is not recognized:
+    /// the bar offers the first ones and the picker lists them.
+    pub suggestions: Vec<AnimeId>,
+    /// The link picker while it is open. The countdown waits for it, so
+    /// that an update cannot go to the wrong anime while the user is
+    /// choosing the right one. Weak, so that closing the picker in any way
+    /// resumes the countdown.
+    pub hold: Option<AnyWeakEntity>,
     pub(super) relations: Relations,
     pub players: Vec<Player>,
     detection: Option<detection::Handle>,
@@ -79,6 +87,11 @@ impl Tracker {
     /// as focused unless the player says it is paused.
     fn player_focused(&self) -> bool {
         self.focused.unwrap_or(self.playing != Some(false))
+    }
+
+    /// The link picker is open.
+    pub fn is_held(&self) -> bool {
+        self.hold.as_ref().is_some_and(|h| h.upgrade().is_some())
     }
 }
 
@@ -164,12 +177,24 @@ impl Model {
         };
         identify_media(&mut media, self.state(), &self.tracker.relations);
         if let Some((elements, id)) = &self.tracker.manual {
-            if *elements == media.episode.elements {
+            if *elements == media.parsed.elements {
+                media.episode = media.parsed.clone();
                 media.episode.anime_id = Some(*id);
                 media.matched = Some(MatchReason::Manual);
             } else {
                 self.tracker.manual = None;
             }
+        }
+        let new_title = self
+            .tracker
+            .media
+            .as_ref()
+            .is_none_or(|old| old.parsed.elements != media.parsed.elements);
+        if media.episode.anime_id.is_some() {
+            self.tracker.suggestions.clear();
+        } else if new_title || self.tracker.suggestions.is_empty() {
+            // Worked out once per file, not on every poll.
+            self.tracker.suggestions = suggestions(self.state(), &media.parsed, 6);
         }
         // Only a different episode is news; the same file found again
         // every few seconds is not.
@@ -184,16 +209,60 @@ impl Model {
         }
     }
 
-    /// "Set as now playing": the playing media is this anime.
+    /// "Set as now playing" and the bar's suggestions: links the playing
+    /// media to this anime, remembering its title unless it is too generic
+    /// to (the picker lets the user decide instead).
     pub fn set_now_playing(&mut self, id: AnimeId, cx: &mut Context<Self>) {
-        let Some(media) = &mut self.tracker.media else {
+        let remember = self
+            .tracker
+            .media
+            .as_ref()
+            .and_then(|m| title_to_remember(&m.parsed))
+            .is_some_and(|title| !is_generic_title(&title));
+        self.link_now_playing(id, remember, cx);
+    }
+
+    /// The playing media is this anime. With `remember`, its title becomes
+    /// an alternative title of the anime, so later episodes match too;
+    /// otherwise the link lasts until the media changes.
+    pub fn link_now_playing(&mut self, id: AnimeId, remember: bool, cx: &mut Context<Self>) {
+        let Some(media) = self.tracker.media.clone() else {
             return;
         };
+        self.tracker.manual = None;
+        if remember && let Some(title) = title_to_remember(&media.parsed) {
+            self.link_title(id, &title, cx);
+            // Recognition now finds it on its own, numbering included.
+            if self.tracker.media.as_ref().and_then(|m| m.episode.anime_id) == Some(id) {
+                return;
+            }
+        }
+        // Once only, or the title is remembered but this episode still does
+        // not fit the anime (a number above its count): link it by hand so
+        // the bar says why it will not update.
+        let mut media = media;
+        media.episode = media.parsed.clone();
         media.episode.anime_id = Some(id);
         media.matched = Some(MatchReason::Manual);
-        self.tracker.manual = Some((media.episode.elements.clone(), id));
+        self.tracker.manual = Some((media.parsed.elements.clone(), id));
+        self.tracker.suggestions.clear();
         let episode = media.episode.clone();
+        self.tracker.media = Some(media);
         self.send_to_session(Some(episode), cx);
+    }
+
+    /// Remembers `title` as an alternative title of `id`, then looks at
+    /// what it changes: the playing media and the library's files.
+    pub fn link_title(&mut self, id: AnimeId, title: &str, cx: &mut Context<Self>) {
+        let today = Zoned::now().date().into();
+        let result = self.startup.state.link_title(id, title, today);
+        self.apply(result, cx);
+        self.recognize_library_title(title, cx);
+        if let Some(media) = self.tracker.media.clone() {
+            self.media_found(Some(media), cx);
+        }
+        let shown = self.state().title(id);
+        self.set_status(format!("Files titled \"{title}\" are now {shown}."), cx);
     }
 
     pub fn accept_update(&mut self, cx: &mut Context<Self>) {
@@ -251,6 +320,12 @@ impl Model {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let ticked = this.update(cx, |this, cx| {
+                    if this.tracker.is_held() {
+                        // Redraw so the bar can say it is waiting.
+                        cx.notify();
+                        return;
+                    }
+                    this.tracker.hold = None;
                     let player_focused = this.tracker.player_focused();
                     this.handle_session(SessionInput::Tick { player_focused }, cx);
                 });

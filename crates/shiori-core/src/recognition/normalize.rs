@@ -8,6 +8,28 @@ use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCa
 /// Normalizes a title for lookup in the title index. The steps and their
 /// order follow Taiga, so that titles match the same way they do there.
 pub fn normalize(title: &str) -> String {
+    let mut s = normalize_spaced(title);
+    s.retain(|c| !is_removable(c));
+    s
+}
+
+/// The words of a title, each normalized like `normalize` does: "Kusuriya
+/// no Hitorigoto 3rd Season" gives `kusuriya`, `no`, `hitorigoto`, `3`.
+/// For comparing titles that are similar but not the same.
+pub fn normalize_words(title: &str) -> Vec<String> {
+    normalize_spaced(title)
+        .split_whitespace()
+        .map(|word| {
+            word.chars()
+                .filter(|c| !is_removable(*c))
+                .collect::<String>()
+        })
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
+/// Every step of `normalize` but the last, which removes the spaces.
+fn normalize_spaced(title: &str) -> String {
     let mut s = title.to_owned();
     roman_numerals(&mut s);
     transliterate(&mut s);
@@ -28,9 +50,7 @@ pub fn normalize(title: &str) -> String {
     ] {
         replace_whole_word(&mut s, before, after);
     }
-    s = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    s.retain(|c| !is_removable(c));
-    s
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn roman_numerals(s: &mut String) {
