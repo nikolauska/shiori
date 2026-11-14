@@ -221,8 +221,10 @@ impl NumberingEditor {
                 cx.defer(move |cx| {
                     let _ = editor.update(cx, |editor, cx| {
                         editor.loading = false;
-                        editor.problem =
-                            error.map(|e| format!("Could not load related anime: {e}").into());
+                        editor.problem = error.map(|e| {
+                            tracing::warn!("Could not load related anime: {e}");
+                            "Couldn't load seasons".into()
+                        });
                         editor.pending_chain = Some(order);
                         cx.notify();
                     });
@@ -363,10 +365,8 @@ impl NumberingEditor {
         let editor = cx.entity().downgrade();
         let title = model.read(cx).state().title(self.root);
         actions::confirm(
-            "Forget this episode numbering?",
-            format!(
-                "Files of {title} and the anime with it are recognized as before, which may suggest a numbering again. Your list and history stay as they are."
-            ),
+            "Forget this numbering?",
+            format!("{title}. Your list and history are not changed."),
             window,
             cx,
             move |cx| {
@@ -379,7 +379,9 @@ impl NumberingEditor {
         );
     }
 
-    fn preview(&self, cx: &App) -> (String, String) {
+    /// Where a file matched to the preview anime with the preview number
+    /// lands.
+    fn preview(&self, cx: &App) -> String {
         let state = self.model.read(cx).state();
         let Some(number) = self
             .preview_number
@@ -389,33 +391,20 @@ impl NumberingEditor {
             .parse::<u32>()
             .ok()
         else {
-            return ("Enter a number".into(), String::new());
+            return "–".into();
         };
         let from = self.preview_anime;
         let from_name = state.title(from);
         let count = state.anime.get(&from).and_then(|a| a.episode_count);
         if number >= 1 && count.is_none_or(|c| number <= c) {
-            return (
-                format!("{from_name}, episode {number}"),
-                format!("Episode {number} already fits {from_name}, so it is kept."),
-            );
+            return format!("{from_name}, episode {number}");
         }
-        let sequence = match self.sequence(cx) {
-            Ok(sequence) => sequence,
-            Err(_) => return ("Fix the numbers first".into(), String::new()),
+        let Ok(sequence) = self.sequence(cx) else {
+            return "–".into();
         };
         match sequence.resolve((number, number)) {
-            Some(r) => (
-                format!("{}, episode {}", state.title(r.anime), r.range.0),
-                format!(
-                    "{number} is beyond {from_name}'s episodes and falls in {}-{}: {number} − {} + 1 = {}.",
-                    r.entry.first, r.entry.last, r.entry.first, r.range.0
-                ),
-            ),
-            None => (
-                "No match".into(),
-                format!("{number} is in no range, so the file stays unrecognized."),
-            ),
+            Some(r) => format!("{}, episode {}", state.title(r.anime), r.range.0),
+            None => "No match".into(),
         }
     }
 
@@ -424,7 +413,7 @@ impl NumberingEditor {
         let state = model.state();
         let anime = state.anime.get(&row.anime);
         let relation = if row.anime == self.root {
-            "Numbering starts here".to_owned()
+            "First".to_owned()
         } else {
             model
                 .related_to(&self.rows.iter().map(|r| r.anime).collect::<Vec<_>>())
@@ -437,7 +426,7 @@ impl NumberingEditor {
             meta.push(format::type_label(anime.kind).to_owned());
             meta.push(match anime.episode_count {
                 Some(n) => format!("{n} eps"),
-                None => "episode count unknown".into(),
+                None => "? eps".into(),
             });
         }
         let anime_id = row.anime;
@@ -509,7 +498,7 @@ impl Render for NumberingEditor {
             .zip(self.rows.iter().map(|r| r.included))
             .partition(|(_, included)| *included);
         let fetched = self.model.read(cx).relations_of(self.root).is_some();
-        let (result, why) = self.preview(cx);
+        let result = self.preview(cx);
         let preview_choices: Vec<(AnimeId, String)> = self
             .rows
             .iter()
@@ -520,17 +509,13 @@ impl Render for NumberingEditor {
         v_flex()
             .gap_3()
             .child(
-                div().text_sm().text_color(muted).child(
-                    "Each included anime's first number is its episode 1. Shiori uses this only for numbers above an anime's own episode count.",
-                ),
-            )
-            .child(
                 h_flex()
                     .gap_2()
                     .child(
                         Button::new("suggest")
                             .small()
-                            .label("Suggest continuous numbering")
+                            .label("Number in order")
+                            .tooltip("1–12, 13–24, … from the episode counts")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.suggest_continuous(window, cx)
                             })),
@@ -541,9 +526,9 @@ impl Render for NumberingEditor {
                             .ghost()
                             .loading(self.loading)
                             .label(if fetched {
-                                "Reload related anime"
+                                "Reload seasons"
                             } else {
-                                "Load related anime from AniList"
+                                "Load seasons from AniList"
                             })
                             .on_click(cx.listener(|this, _, _, cx| this.load_related(cx))),
                     ),
@@ -553,7 +538,13 @@ impl Render for NumberingEditor {
                     .id("numbering-rows")
                     .max_h(px(300.))
                     .overflow_y_scroll()
-                    .child(div().text_xs().font_semibold().text_color(muted).child("IN THIS NUMBERING"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(muted)
+                            .child("INCLUDED"),
+                    )
                     .children(included.into_iter().map(|(row, _)| row))
                     .when(!others.is_empty(), |el| {
                         el.child(
@@ -562,28 +553,29 @@ impl Render for NumberingEditor {
                                 .text_xs()
                                 .font_semibold()
                                 .text_color(muted)
-                                .child("RELATED, NOT INCLUDED"),
+                                .child("OTHER RELATED"),
                         )
                         .children(others.into_iter().map(|(row, _)| row))
-                        .child(div().text_xs().text_color(muted).child(
-                            "Movies, specials and side stories start excluded. Include one when releases number it, for example a special as 0.",
-                        ))
                     }),
             )
-            .child(match &valid {
-                Ok(_) => div().text_sm().text_color(cx.theme().success).child("The numbers are valid. Gaps are allowed and mean no match."),
-                Err(error) => div().text_sm().text_color(cx.theme().warning).child(error.clone()),
+            // Only what is wrong; valid numbers need no comment.
+            .when_some(valid.as_ref().err(), |el, error| {
+                el.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().warning)
+                        .child(error.clone()),
+                )
             })
             .child(div().h(px(1.)).bg(cx.theme().border))
             .child(
-                v_flex()
-                    .gap_2()
-                    .child(div().text_xs().text_color(muted).child("PREVIEW: a file matched to"))
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .flex_wrap()
-                            .children(preview_choices.into_iter().enumerate().map(|(ix, (id, title))| {
+                v_flex().gap_2().child(
+                    h_flex()
+                        .gap_1()
+                        .flex_wrap()
+                        .child(div().text_xs().text_color(muted).child("Test"))
+                        .children(preview_choices.into_iter().enumerate().map(
+                            |(ix, (id, title))| {
                                 let selected = id == self.preview_anime;
                                 Button::new(("preview", ix))
                                     .xsmall()
@@ -594,25 +586,33 @@ impl Render for NumberingEditor {
                                         this.preview_anime = id;
                                         cx.notify();
                                     }))
-                            }))
-                            .child(div().text_xs().text_color(muted).child("with number"))
-                            .child(div().w(px(72.)).child(Input::new(&self.preview_number).small())),
-                    )
-                    .child(div().text_base().font_semibold().child(result))
-                    .child(div().text_xs().text_color(muted).child(why)),
+                            },
+                        ))
+                        .child(
+                            div()
+                                .w(px(64.))
+                                .child(Input::new(&self.preview_number).small()),
+                        )
+                        .child(div().text_color(muted).child("→"))
+                        .child(div().text_sm().font_semibold().child(result)),
+                ),
             )
             .when_some(self.problem.clone(), |el, problem| {
-                el.child(div().text_sm().text_color(cx.theme().warning).child(problem))
+                el.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().warning)
+                        .child(problem),
+                )
             })
             .child(
                 h_flex()
                     .gap_2()
                     .child(div().flex_1().when(self.id != 0, |el| {
                         el.child(
-                            Button::new("forget")
-                                .ghost()
-                                .label("Forget…")
-                                .on_click(cx.listener(|this, _, window, cx| this.forget(window, cx))),
+                            Button::new("forget").ghost().label("Forget…").on_click(
+                                cx.listener(|this, _, window, cx| this.forget(window, cx)),
+                            ),
                         )
                     }))
                     .child(
@@ -625,13 +625,15 @@ impl Render for NumberingEditor {
                             Button::new("once")
                                 .label("Use once")
                                 .disabled(valid.is_err())
-                                .on_click(cx.listener(|this, _, window, cx| this.use_once(window, cx))),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.use_once(window, cx)),
+                                ),
                         )
                     })
                     .child(
                         Button::new("save")
                             .primary()
-                            .label("Save and use")
+                            .label("Save")
                             .disabled(valid.is_err())
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),

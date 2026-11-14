@@ -801,16 +801,14 @@ impl Inspector {
         let list = settings
             .linked
             .iter()
-            .map(|l| format!("\"{}\" ({})", l.title, format::date_label(l.date)))
+            .map(|l| l.title.clone())
             .collect::<Vec<_>>()
             .join(", ");
         Some(
             div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(format!(
-                    "Linked from a file: {list}. Delete a line above to undo its link."
-                )),
+                .child(format!("Linked: {list}")),
         )
     }
 
@@ -819,25 +817,21 @@ impl Inspector {
     fn numbering_row(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let id = self.id?;
         let state = self.model.read(cx).state();
-        let text = match state.numbering.of(id) {
-            Some(s) => format!(
-                "In a remembered episode numbering of {} anime, starting with {}.",
-                s.entries.len(),
-                state.title(s.root)
-            ),
-            None => "For releases that number episodes across seasons.".to_owned(),
-        };
+        let text = state
+            .numbering
+            .of(id)
+            .map(|s| format!("Numbered with {} anime", s.entries.len()));
         let model = self.model.clone();
         Some(
             v_flex()
                 .gap_1()
                 .pt_2()
-                .child(
+                .children(text.map(|text| {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child(text),
-                )
+                        .child(text)
+                }))
                 .child(
                     h_flex().child(
                         Button::new("numbering")
@@ -860,7 +854,7 @@ impl Inspector {
                 div()
                     .text_xs()
                     .text_color(muted)
-                    .child("Alternative titles, one per line. Used to recognize file names."),
+                    .child("Alternative titles, one per line"),
             )
             .child(div().h(px(80.)).child(Textarea::new(&self.synonyms)))
             .children(self.linked_titles(cx))

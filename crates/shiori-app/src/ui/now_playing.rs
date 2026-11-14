@@ -7,7 +7,7 @@ use gpui::{
     prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use shiori_core::entry::is_in_list;
 use shiori_core::recognition::{
     MatchReason, NumberingSequence, Proposal, ReviewReason, SequenceEntry, TitleKind,
@@ -50,15 +50,13 @@ fn update(model: &Model, media: &Media) -> Update {
         Phase::Idle if media.episode.anime_id.is_none() => plain(""),
         Phase::Idle => plain(""),
         Phase::Denied => plain(match state.reason {
-            Reason::OutsideLibrary => "Not updating: outside the library folders",
-            Reason::InvalidEpisode => "Not updating: not a valid episode number",
+            Reason::OutsideLibrary => "Outside library folders",
+            Reason::InvalidEpisode => "No valid episode number",
             Reason::AlreadyWatched => "Already watched",
             Reason::None | Reason::SkipsAhead => "Not updating",
         }),
         // Shown over the countdown, which stands still until a pick is made.
-        Phase::Countdown | Phase::WaitingForClose if model.tracker.is_held() => {
-            plain("Waiting while you pick an anime")
-        }
+        Phase::Countdown | Phase::WaitingForClose if model.tracker.is_held() => plain("Paused"),
         Phase::Countdown => {
             let delay = update_settings(&model.state().settings).delay;
             Update {
@@ -75,23 +73,20 @@ fn update(model: &Model, media: &Media) -> Update {
             }
         }
         Phase::WaitingForClose => Update {
-            detail: format!("Will update when {} is closed", media.player),
+            detail: "Updates when closed".into(),
             attention: false,
             progress: None,
             buttons: &[("Update now", true), ("Cancel", false)],
         },
         Phase::Confirming => Update {
-            detail: format!(
-                "Episode {} is ahead of your progress ({})",
-                state.episode, state.previous_episode
-            ),
+            detail: format!("Skips ahead of episode {}", state.previous_episode),
             attention: true,
             progress: None,
             buttons: &[("Update", true), ("Cancel", false)],
         },
-        Phase::Committed => plain(&format!("Updated to episode {}", state.episode)),
+        Phase::Committed => plain("Updated"),
         Phase::Cancelled => Update {
-            detail: "Update cancelled".into(),
+            detail: "Cancelled".into(),
             attention: false,
             progress: None,
             buttons: &[("Update anyway", true)],
@@ -211,14 +206,11 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
                 (Some(n), None) => format!("Episode {n} · "),
                 (None, _) => String::new(),
             };
+            // The player and file are on the Now playing tab; the bar keeps
+            // to what tells the user whether it is the right episode.
             (
                 m.state().title(id).into(),
-                format!(
-                    "{number}{} · {} · {}",
-                    progress_label(m, id),
-                    media.player,
-                    source_label(&media)
-                ),
+                format!("{number}{}", progress_label(m, id)),
             )
         }
         None => {
@@ -241,17 +233,13 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
                         .and_then(|a| a.episode_count)
                         .unwrap_or_default();
                     format!(
-                        "Episode {} is beyond {}'s {count}",
-                        suggestion.miss.range.1,
+                        "{} has {count} episodes",
                         state.title(suggestion.miss.anime)
                     )
                 }
                 None => "Not recognized".to_owned(),
             };
-            (
-                title.into(),
-                format!("{why} · {} · {}", media.player, source_label(&media)),
-            )
+            (title.into(), why)
         }
     };
 
@@ -314,7 +302,7 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
         m.tracker
             .suggestions
             .iter()
-            .take(2)
+            .take(1)
             .map(|&s| (s, m.state().title(s)))
             .collect()
     } else {
@@ -335,23 +323,23 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
                     model.update(cx, |model, cx| model.set_now_playing(anime, cx))
                 })
         });
-    let link = {
+    // A recognized anime offers this only when the update is denied, which
+    // is when a wrong match shows; otherwise it is on the Now playing tab.
+    let link = (id.is_none() || denied).then(|| {
         let model = model.clone();
-        let (label, tooltip) = match (id, denied) {
-            (None, _) => ("Link anime…", "Tell Shiori which anime this is"),
-            (Some(_), true) => ("Wrong anime?", "Link it to another anime"),
-            (Some(_), false) => ("Change…", "Link it to another anime"),
-        };
         Button::new("link-anime")
             .xsmall()
             .when(id.is_none(), |b| b.primary())
             .when(id.is_some(), |b| b.ghost())
-            .label(label)
-            .tooltip(tooltip)
+            .label(if id.is_none() {
+                "Link anime…"
+            } else {
+                "Wrong anime?"
+            })
             .on_click(move |_, window, cx| {
                 link_picker::open(&model, link_picker::Target::NowPlaying, window, cx)
             })
-    };
+    });
 
     // The title matched but the number is above the anime's count: the
     // numbering suggestion is the one problem shown, instead of chips.
@@ -365,7 +353,6 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
                 .gap_3()
                 .child(what)
                 .child(numbering)
-                .child(link.ghost())
                 .into_any_element(),
         );
     }
@@ -377,12 +364,9 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
             .gap_3()
             .child(what)
             .child(status)
-            .when(id.is_none(), |el| {
-                el.child(div().flex_none().text_color(muted).child("Is it"))
-            })
             .children(chips)
             .children(buttons(model, &update))
-            .child(link)
+            .children(link)
             .into_any_element(),
     )
 }
@@ -418,15 +402,11 @@ fn numbering_controls(model: &Entity<Model>, cx: &App) -> Option<AnyElement> {
             saved: jiff::Timestamp::UNIX_EPOCH,
         });
     let (question, draft, usable) = match &suggestion.state {
-        SuggestionState::Loading => ("Checking related seasons…".to_owned(), None, None),
-        SuggestionState::Failed(error) => (
-            format!("Could not check related seasons: {error}"),
-            Some(fallback),
-            None,
-        ),
+        SuggestionState::Loading => ("Checking seasons…".to_owned(), None, None),
+        SuggestionState::Failed => ("Couldn't check seasons".to_owned(), Some(fallback), None),
         SuggestionState::Ready(Proposal::Use { sequence, resolved }) => (
             format!(
-                "Is it {}, episode {}?",
+                "{}, episode {}?",
                 state.title(resolved.anime),
                 resolved.range.0
             ),
@@ -435,16 +415,10 @@ fn numbering_controls(model: &Entity<Model>, cx: &App) -> Option<AnyElement> {
         ),
         SuggestionState::Ready(Proposal::Review { draft, reason }) => (
             match reason {
-                ReviewReason::Branch => {
-                    "Its seasons branch on AniList; pick which belong.".to_owned()
-                }
-                ReviewReason::UnknownCount(id) => {
-                    format!("{}'s episode count is unknown.", state.title(*id))
-                }
-                ReviewReason::NoFit => "No season has that number.".to_owned(),
-                ReviewReason::Ambiguous => {
-                    "Count from the first season or from this one?".to_owned()
-                }
+                ReviewReason::Branch => "Seasons branch".to_owned(),
+                ReviewReason::UnknownCount(_) => "Episode count unknown".to_owned(),
+                ReviewReason::NoFit => "No season fits".to_owned(),
+                ReviewReason::Ambiguous => "Unclear which season".to_owned(),
             },
             Some(draft.clone()),
             None,
@@ -458,45 +432,34 @@ fn numbering_controls(model: &Entity<Model>, cx: &App) -> Option<AnyElement> {
             .when(usable.is_none(), |b| b.primary())
             .when(usable.is_some(), |b| b.ghost())
             .label("Review…")
-            .tooltip("Open the episode numbering")
             .on_click(move |_, window, cx| {
                 numbering_editor::open(&model, draft.clone(), Some(preview), true, window, cx)
             })
     });
+    // "Use once" is in the editor: two ways to say yes in a bar this small
+    // is one too many.
     let answers = usable.map(|sequence| {
-        let remember = {
-            let model = model.clone();
-            let sequence = sequence.clone();
-            Button::new("use-remember")
-                .xsmall()
-                .primary()
-                .label("Use and remember")
-                .on_click(move |_, _, cx| {
-                    model.update(cx, |model, cx| {
-                        if let Err(error) = model.save_numbering(sequence.clone(), cx) {
-                            model.set_error(format!("Could not save the numbering: {error}"), cx);
-                        }
-                    })
+        let model = model.clone();
+        Button::new("use-remember")
+            .xsmall()
+            .primary()
+            .label("Yes")
+            .tooltip("Use and remember this numbering")
+            .on_click(move |_, _, cx| {
+                model.update(cx, |model, cx| {
+                    if let Err(error) = model.save_numbering(sequence.clone(), cx) {
+                        model.set_error(format!("Could not save the numbering: {error}"), cx);
+                    }
                 })
-        };
-        let once = {
-            let model = model.clone();
-            Button::new("use-once")
-                .xsmall()
-                .ghost()
-                .label("Use once")
-                .on_click(move |_, _, cx| {
-                    model.update(cx, |model, cx| model.use_numbering_once(&sequence, cx))
-                })
-        };
-        [remember, once]
+            })
     });
     let dismiss = {
         let model = model.clone();
         Button::new("dismiss-numbering")
             .xsmall()
             .ghost()
-            .label("Dismiss")
+            .icon(IconName::Close)
+            .tooltip("Dismiss")
             .on_click(move |_, _, cx| model.update(cx, |model, cx| model.dismiss_suggestion(cx)))
     };
     let attention = !matches!(suggestion.state, SuggestionState::Loading);
@@ -512,90 +475,49 @@ fn numbering_controls(model: &Entity<Model>, cx: &App) -> Option<AnyElement> {
                     .text_color(if attention { warning } else { muted })
                     .child(question),
             )
-            .children(answers.into_iter().flatten())
+            .children(answers)
             .children(review)
             .child(dismiss)
             .into_any_element(),
     )
 }
 
-/// Why the media matched the anime, as a sentence.
-fn matched_because(model: &Model, source: &Source, reason: &MatchReason) -> String {
-    let origin = match source {
-        Source::File(_) => "file name",
-        Source::Title(_) => "window title",
-    };
-    // "Title" or "Title" with season 3: the season counts only when it was
-    // needed to find the anime.
+/// How the media matched the anime, in a few words.
+fn matched_by(model: &Model, reason: &MatchReason) -> String {
     let quoted = |title: &str, season: Option<u32>| match season {
-        Some(season) => format!("\"{title}\" with season {season}"),
+        Some(season) => format!("\"{title}\" S{season}"),
         None => format!("\"{title}\""),
     };
+    let state = model.state();
     match reason {
         MatchReason::Title {
             title,
             season,
             kind,
         } => {
-            let file = quoted(title, *season);
+            let title = quoted(title, *season);
             match kind {
-                TitleKind::MainTitle => format!("The {origin}'s {file} matches its title."),
-                TitleKind::UserSynonym => format!(
-                    "The {origin}'s {file} is one of your alternative titles for it (Settings tab)."
-                ),
-                TitleKind::TitleWithYear => {
-                    format!("The {origin}'s {file} matches its title with the start year.")
-                }
-                TitleKind::ServiceSynonym => format!(
-                    "The {origin}'s {file} matches another title {} lists for it.",
-                    model.service_name()
-                ),
+                TitleKind::MainTitle => format!("Title {title}"),
+                TitleKind::UserSynonym => format!("Your title {title}"),
+                TitleKind::TitleWithYear => format!("Title with year {title}"),
+                TitleKind::ServiceSynonym => format!("{} title {title}", model.service_name()),
             }
         }
         MatchReason::Redirect {
-            title,
-            season,
             from,
-            from_range: (first, last),
+            from_range: (_, last),
             ..
-        } => {
-            let number = if last > first {
-                format!("episodes {first}-{last}")
-            } else {
-                format!("episode {last}")
-            };
-            format!(
-                "The {origin}'s {} matches {}, which has no {number}. The anime relations file moves it to this anime.",
-                quoted(title, *season),
-                model.state().title(*from)
-            )
-        }
+        } => format!("Relations file ({} #{last})", state.title(*from)),
         MatchReason::Numbering {
-            title,
-            season,
             from,
-            from_range: (first, last),
+            from_range: (_, last),
             ..
-        } => {
-            let number = if last > first {
-                format!("{first}-{last}")
-            } else {
-                last.to_string()
-            };
-            format!(
-                "The {origin}'s {} matches {}, and your remembered numbering puts number {number} in this anime.",
-                quoted(title, *season),
-                model.state().title(*from)
-            )
-        }
+        } => format!("Your numbering ({} #{last})", state.title(*from)),
         MatchReason::NumberingOnce {
             from,
             from_range: (_, last),
-        } => format!(
-            "You used the suggested numbering for this playback: number {last} of {} is this anime's.",
-            model.state().title(*from)
-        ),
-        MatchReason::Manual => "You picked it by hand.".into(),
+        } => format!("Suggested numbering, once ({} #{last})", state.title(*from)),
+        MatchReason::Manual => "Picked by you".into(),
     }
 }
 
@@ -681,33 +603,18 @@ pub fn tab(model: &Entity<Model>, id: AnimeId, cx: &App) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     let warning = cx.theme().warning;
 
-    let mut details = vec![
-        (
-            match media.source {
-                Source::File(_) => "File",
-                Source::Title(_) => "Window title",
-            },
-            source_label(media),
-        ),
-        ("Player", media.player.clone()),
-    ];
-    if let Source::File(path) = &media.source
-        && let Some(folder) = path.parent()
-    {
-        details.push(("Folder", folder.display().to_string()));
+    let mut details = Vec::new();
+    if let Some(reason) = &media.matched {
+        details.push(("Matched by", matched_by(m, reason)));
     }
-    for (label, kind) in [
-        ("Release group", ElementKind::ReleaseGroup),
-        ("Resolution", ElementKind::VideoResolution),
-    ] {
-        if let Some(value) = media.episode.get(kind) {
-            details.push((label, value.to_owned()));
-        }
-    }
-    let because = media
-        .matched
-        .as_ref()
-        .map(|r| matched_because(m, &media.source, r));
+    details.push((
+        match media.source {
+            Source::File(_) => "File",
+            Source::Title(_) => "Window",
+        },
+        source_label(media),
+    ));
+    details.push(("Player", media.player.clone()));
 
     v_flex()
         .gap_3()
@@ -740,33 +647,6 @@ pub fn tab(model: &Entity<Model>, id: AnimeId, cx: &App) -> AnyElement {
                 })
                 .child(h_flex().gap_2().children(buttons(model, &update))),
         )
-        .when_some(because, |el, because| {
-            el.child(
-                v_flex()
-                    .gap_1()
-                    .p_2()
-                    .rounded_md()
-                    .bg(cx.theme().muted)
-                    .text_xs()
-                    .child(div().text_color(muted).child("Matched because"))
-                    .child(div().child(because))
-                    .child(div().child({
-                        let model = model.clone();
-                        Button::new("wrong-anime")
-                            .xsmall()
-                            .link()
-                            .label("Wrong anime? Link another…")
-                            .on_click(move |_, window, cx| {
-                                link_picker::open(
-                                    &model,
-                                    link_picker::Target::NowPlaying,
-                                    window,
-                                    cx,
-                                )
-                            })
-                    })),
-            )
-        })
         .child(
             v_flex().gap_1().children(
                 details
@@ -774,5 +654,15 @@ pub fn tab(model: &Entity<Model>, id: AnimeId, cx: &App) -> AnyElement {
                     .map(|(label, value)| row(label, value, cx)),
             ),
         )
+        .child(h_flex().child({
+            let model = model.clone();
+            Button::new("wrong-anime")
+                .xsmall()
+                .ghost()
+                .label("Wrong anime?")
+                .on_click(move |_, window, cx| {
+                    link_picker::open(&model, link_picker::Target::NowPlaying, window, cx)
+                })
+        }))
         .into_any_element()
 }

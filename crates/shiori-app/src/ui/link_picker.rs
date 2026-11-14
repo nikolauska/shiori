@@ -53,11 +53,10 @@ impl Group {
     }
 }
 
-/// How a result would fare, in the words the badge and preview use.
+/// How a result would fare, as its badge says.
 struct Fit {
     badge: String,
     tone: Tone,
-    preview: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -255,79 +254,35 @@ impl LinkPicker {
 
     /// What linking to `id` would do, from the same rules the tracker uses.
     fn fit(&self, id: AnimeId, cx: &App) -> Fit {
-        let m = self.model.read(cx);
-        let state = m.state();
-        let name = state.title(id);
-        let Some(anime) = state.anime.get(&id) else {
-            return Fit {
-                badge: String::new(),
-                tone: Tone::Neutral,
-                preview: String::new(),
-            };
+        let none = Fit {
+            badge: String::new(),
+            tone: Tone::Neutral,
         };
+        let state = self.model.read(cx).state();
+        let Some(anime) = state.anime.get(&id) else {
+            return none;
+        };
+        // A library file has no playback to update.
         if let Target::File(_) = self.target {
-            return Fit {
-                badge: String::new(),
-                tone: Tone::Neutral,
-                preview: format!(
-                    "Files titled \"{}\" will be recognized as {name}.",
-                    self.title()
-                ),
-            };
+            return none;
         }
         let entry = state.entries.get(&id).filter(|e| is_in_list(Some(e)));
         let mut episode = self.episode.clone();
         episode.anime_id = Some(id);
         let number = episode.episode_number_range().map_or(1, |(_, last)| last);
         let decision = decide_update(&episode, anime, entry, false);
-        let (badge, tone, preview) = match (decision.action, decision.reason) {
-            (Action::Allow, _) if entry.is_none() => (
-                "Adds to Watching".to_owned(),
-                Tone::Good,
-                format!(
-                    "It is added to your list as Watching, at episode {number}, after the countdown."
-                ),
-            ),
-            (Action::Allow, _) => (
-                "Next episode".to_owned(),
-                Tone::Good,
-                format!("Your progress goes to episode {number} after the countdown."),
-            ),
-            (Action::Confirm, _) => (
-                "Ahead of progress".to_owned(),
-                Tone::Warn,
-                format!(
-                    "Episode {number} is ahead of your progress ({}), so Shiori asks first.",
-                    entry.map_or(0, |e| e.watched_episodes)
-                ),
-            ),
-            (_, Reason::AlreadyWatched) => (
-                "Already watched".to_owned(),
-                Tone::Neutral,
-                "Already watched, so nothing will update.".to_owned(),
-            ),
+        let (badge, tone) = match (decision.action, decision.reason) {
+            (Action::Allow, _) if entry.is_none() => ("Adds to list".to_owned(), Tone::Good),
+            (Action::Allow, _) => ("Next episode".to_owned(), Tone::Good),
+            (Action::Confirm, _) => ("Skips ahead".to_owned(), Tone::Warn),
+            (_, Reason::AlreadyWatched) => ("Watched".to_owned(), Tone::Neutral),
             (_, Reason::InvalidEpisode) => match anime.episode_count {
-                Some(count) if number > count => (
-                    format!("Episode {number} > {count}"),
-                    Tone::Warn,
-                    format!(
-                        "Episode {number} is beyond its {count} episodes, so nothing will update."
-                    ),
-                ),
-                _ => (
-                    "No episode number".to_owned(),
-                    Tone::Warn,
-                    "The file has no episode number Shiori can use, so nothing will update."
-                        .to_owned(),
-                ),
+                Some(count) if number > count => (format!("Has {count} episodes"), Tone::Warn),
+                _ => ("No episode number".to_owned(), Tone::Warn),
             },
-            _ => (String::new(), Tone::Neutral, String::new()),
+            _ => (String::new(), Tone::Neutral),
         };
-        Fit {
-            badge,
-            tone,
-            preview: format!("{name}: {preview}"),
-        }
+        Fit { badge, tone }
     }
 
     fn link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -345,10 +300,7 @@ impl LinkPicker {
                     .as_ref()
                     .is_some_and(|m| m.parsed.elements == self.episode.elements);
                 if !still_playing {
-                    self.problem = Some(
-                        "The playing video changed since this opened. Close it and pick again."
-                            .into(),
-                    );
+                    self.problem = Some("The video changed. Pick again.".into());
                     cx.notify();
                     return;
                 }
@@ -540,38 +492,30 @@ impl Render for LinkPicker {
                     .p_2()
                     .text_sm()
                     .text_color(muted)
-                    .child("No anime in Shiori matches. Search AniList below.")
+                    .child("No matches")
                     .into_any_element(),
             );
         }
         let searched_here = self.searched.as_deref() == Some(text.as_str());
         let search_label = if self.searching {
-            "Searching AniList...".to_owned()
+            "Searching…"
         } else if searched_here && self.online.is_empty() {
-            format!("Nothing on AniList for \"{text}\"")
+            "Nothing on AniList"
         } else {
-            format!("Search AniList for \"{text}\"")
+            "Search AniList"
         };
 
         let selected = self.selected;
-        let fit = selected.map(|id| self.fit(id, cx));
         let title = self.title().to_owned();
         let state = self.model.read(cx).state();
-        let target_name = selected.map(|id| state.title(id)).unwrap_or_default();
+        // Linking moves a title that belongs to another anime; say from where.
         let current = linked_to(&state.anime_settings, &title).filter(|id| Some(*id) != selected);
         let remember_text = match current {
-            Some(other) => format!(
-                "Remember: move \"{title}\" from {} to {target_name}",
-                state.title(other)
-            ),
-            None => format!("Remember: files titled \"{title}\" are {target_name}"),
+            Some(other) => format!("Remember \"{title}\" (now {})", state.title(other)),
+            None => format!("Remember \"{title}\""),
         };
         let can_remember = !title.is_empty() && !normalize(&title).is_empty();
         let now_playing = matches!(self.target, Target::NowPlaying);
-        let link_label = match (&self.target, self.remember) {
-            (Target::File(_), _) | (Target::NowPlaying, true) => "Link and remember",
-            (Target::NowPlaying, false) => "Link for this playback",
-        };
 
         v_flex()
             .gap_2()
@@ -596,7 +540,6 @@ impl Render for LinkPicker {
                     ),
             )
             .child(div().h(px(1.)).bg(cx.theme().border))
-            .when_some(fit, |el, fit| el.child(div().text_sm().child(fit.preview)))
             .when(now_playing && can_remember && selected.is_some(), |el| {
                 el.child(
                     Checkbox::new("remember")
@@ -628,7 +571,7 @@ impl Render for LinkPicker {
                     .child(
                         Button::new("link")
                             .primary()
-                            .label(link_label)
+                            .label("Link")
                             .disabled(selected.is_none())
                             .on_click(cx.listener(|this, _, window, cx| this.link(window, cx))),
                     ),

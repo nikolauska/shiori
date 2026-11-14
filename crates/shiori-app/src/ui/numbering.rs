@@ -32,7 +32,8 @@ pub struct Suggestion {
 pub enum SuggestionState {
     Loading,
     Ready(Proposal),
-    Failed(String),
+    /// The relations could not be loaded; the reason is in the log.
+    Failed,
 }
 
 /// Seasons are TV and web series; movies, OVAs and specials are numbered
@@ -163,7 +164,10 @@ impl Model {
                         anime.get(&id).and_then(|a| a.episode_count)
                     }))
                 }
-                Err(error) => SuggestionState::Failed(error),
+                Err(error) => {
+                    tracing::warn!("Could not check related seasons: {error}");
+                    SuggestionState::Failed
+                }
             };
             cx.notify();
         });

@@ -366,10 +366,7 @@ impl SettingsView {
                 h_flex()
                     .gap_2()
                     .py_1()
-                    .child(line(
-                        format!("\"{title}\" → {anime}"),
-                        format!("Linked {date}"),
-                    ))
+                    .child(line(format!("\"{title}\" → {anime}"), date))
                     .child(
                         Button::new(("forget-link", ix))
                             .small()
@@ -410,13 +407,13 @@ impl SettingsView {
                             let model = forget.clone();
                             let root = model.read(cx).state().title(s.root);
                             actions::confirm(
-                                "Forget this episode numbering?",
-                                format!(
-                                    "Files of {root} and the anime with it are recognized as before, which may suggest a numbering again. Your list and history stay as they are."
-                                ),
+                                "Forget this numbering?",
+                                format!("{root}. Your list and history are not changed."),
                                 window,
                                 cx,
-                                move |cx| model.update(cx, |model, cx| model.forget_numbering(s.id, cx)),
+                                move |cx| {
+                                    model.update(cx, |model, cx| model.forget_numbering(s.id, cx))
+                                },
                             )
                         }),
                 )
@@ -426,30 +423,11 @@ impl SettingsView {
         let numbering_rows: Vec<_> = numbering_rows.collect();
         v_flex()
             .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child("Corrections you made to recognition. Changes here apply at once."),
-            )
             .child(div().pt_2().font_semibold().child("Title links"))
-            .when(link_rows.is_empty(), |el| {
-                el.child(empty(
-                    "None yet. Link a file to an anime from \"now playing\" or the Library.",
-                ))
-            })
+            .when(link_rows.is_empty(), |el| el.child(empty("None")))
             .children(link_rows)
-            .child(
-                div()
-                    .pt_2()
-                    .font_semibold()
-                    .child("Remembered episode numbering"),
-            )
-            .when(numbering_rows.is_empty(), |el| {
-                el.child(empty(
-                    "None yet. Shiori suggests one when an episode number is beyond its season.",
-                ))
-            })
+            .child(div().pt_2().font_semibold().child("Episode numbering"))
+            .when(numbering_rows.is_empty(), |el| el.child(empty("None")))
             .children(numbering_rows)
             .into_any_element()
     }
