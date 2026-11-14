@@ -365,8 +365,10 @@ impl NumberingEditor {
         let editor = cx.entity().downgrade();
         let title = model.read(cx).state().title(self.root);
         actions::confirm(
-            "Forget this numbering?",
-            format!("{title}. Your list and history are not changed."),
+            format!("Forget the numbering of {title}?"),
+            "Your list and history stay as they are.".to_owned(),
+            "Forget",
+            actions::Risk::Danger,
             window,
             cx,
             move |cx| {

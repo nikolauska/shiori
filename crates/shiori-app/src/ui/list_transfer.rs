@@ -2,10 +2,11 @@
 //! AniList and Taiga all read or write, and public AniList lists.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use gpui::{AnyWindowHandle, App, Context};
-use gpui_component::WindowExt as _;
+use gpui::prelude::FluentBuilder as _;
+use gpui::{AnyWindowHandle, App, Context, ParentElement as _, Styled as _, div};
+use gpui_component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use jiff::Timestamp;
 use shiori_app::import::{self, Summary};
 use shiori_app::mal_xml;
@@ -14,7 +15,9 @@ use shiori_core::{Anime, AnimeId};
 use shiori_sync::anilist::AniList;
 use shiori_sync::{Account, Service as _};
 
+use super::list_location::file_name;
 use super::model::Model;
+use super::widgets;
 
 /// What `fetch_all` calls with every anime found.
 type Found = Box<dyn FnOnce(&mut Model, Result<Vec<Anime>, String>, &mut Context<Model>)>;
@@ -26,13 +29,6 @@ pub type Finished = Box<dyn FnOnce(Summary, &mut App)>;
 enum Lookup {
     AniList,
     MyAnimeList,
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name().map_or_else(
-        || path.display().to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    )
 }
 
 /// "A, B, C and 4 more", for telling which anime something happened to.
@@ -123,19 +119,22 @@ impl Model {
                 let (xml, left_out) = mal_xml::write(this.state());
                 if let Err(error) = std::fs::write(&path, xml) {
                     tracing::error!("Could not export to {}: {error}", path.display());
-                    this.set_error(format!("Could not export to {}.", path.display()), cx);
+                    this.set_error(format!("Could not export to {}.", file_name(&path)), cx);
                     return;
                 }
-                let mut text = format!("Exported your list to {}.", path.display());
-                if !left_out.is_empty() {
+                let listed = this
+                    .state()
+                    .entries
+                    .values()
+                    .filter(|e| is_in_list(Some(e)))
+                    .count();
+                let detail = (!left_out.is_empty()).then(|| {
                     let titles: Vec<String> =
                         left_out.iter().map(|&id| this.state().title(id)).collect();
-                    text.push_str(&format!(
-                        " Left out, with no MyAnimeList id: {}.",
-                        some_titles(&titles)
-                    ));
-                }
-                this.set_status(text, cx);
+                    format!("Left out, with no MyAnimeList id: {}", some_titles(&titles))
+                });
+                let title = format!("Exported {} anime", listed - left_out.len());
+                this.saved(&title, &path, detail, cx);
             };
         self.fetch_all(Lookup::AniList, missing, Vec::new(), Box::new(write), cx);
     }
@@ -243,28 +242,44 @@ impl Model {
     }
 }
 
-/// Shows an import's outcome in a dialog on `window`.
+/// Shows an import's outcome in a dialog on `window`: what was added, what
+/// was already there and what could not be found, as numbers to take in at
+/// a glance, with the missing titles under them.
 pub fn show_summary(window: AnyWindowHandle) -> Finished {
     Box::new(move |summary, cx| {
-        let mut text = match summary.added {
-            1 => "Added 1 anime.".to_owned(),
-            n => format!("Added {n} anime."),
-        };
-        if summary.already > 0 {
-            text.push_str(&format!(
-                " {} were already in your list and were left as they were.",
-                summary.already
-            ));
-        }
-        if !summary.not_found.is_empty() {
-            text.push_str(&format!(
-                "\n\nNot found on AniList: {}.",
-                some_titles(&summary.not_found)
-            ));
-        }
+        let summary = std::rc::Rc::new(summary);
         let _ = window.update(cx, move |_, window, cx| {
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                alert.title("Import finished").description(text.clone())
+            window.open_alert_dialog(cx, move |alert, _, cx| {
+                let theme = cx.theme();
+                let (success, warning, muted) =
+                    (theme.success, theme.warning, theme.muted_foreground);
+                let tile = |value: usize, color: Option<gpui::Hsla>, label: &'static str| {
+                    widgets::stat_tile(
+                        div()
+                            .when_some(color.filter(|_| value > 0), |d, c| d.text_color(c))
+                            .child(value.to_string()),
+                        label,
+                        cx,
+                    )
+                };
+                let missing = (!summary.not_found.is_empty()).then(|| {
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!("Not found: {}", some_titles(&summary.not_found)))
+                });
+                alert.title("Import finished").description(
+                    v_flex()
+                        .gap_3()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(tile(summary.added, Some(success), "added"))
+                                .child(tile(summary.already, None, "already there"))
+                                .child(tile(summary.not_found.len(), Some(warning), "not found")),
+                        )
+                        .children(missing),
+                )
             });
         });
     })

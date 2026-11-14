@@ -71,11 +71,18 @@ pub struct Model {
 impl EventEmitter<AppEvent> for Model {}
 
 /// Requests from views that the main window carries out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiRequest {
     OpenAnime(AnimeId),
     /// Show the anime that is playing, on its Now playing tab.
     ShowNowPlaying(AnimeId),
+    /// A file was written where the user chose: say so with a way to
+    /// open its folder, instead of a full path in the status bar.
+    Saved {
+        title: SharedString,
+        detail: SharedString,
+        folder: std::path::PathBuf,
+    },
 }
 
 impl EventEmitter<UiRequest> for Model {}

@@ -8,6 +8,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::notification::Notification;
 use gpui_component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
@@ -61,12 +62,33 @@ impl MainWindow {
             cx.subscribe_in(
                 &model,
                 window,
-                |this, _, request: &UiRequest, window, cx| match *request {
-                    UiRequest::OpenAnime(id) => this.open_anime(id, window, cx),
-                    UiRequest::ShowNowPlaying(id) => {
+                |this, _, request: &UiRequest, window, cx| match request {
+                    &UiRequest::OpenAnime(id) => this.open_anime(id, window, cx),
+                    &UiRequest::ShowNowPlaying(id) => {
                         this.open_anime(id, window, cx);
                         this.inspector
                             .update(cx, |inspector, cx| inspector.show_now_playing(cx));
+                    }
+                    UiRequest::Saved {
+                        title,
+                        detail,
+                        folder,
+                    } => {
+                        let folder = folder.clone();
+                        let notification = Notification::success(detail.clone())
+                            .title(title.clone())
+                            .action(move |_, _, _| {
+                                let folder = folder.clone();
+                                Button::new("show-folder")
+                                    .small()
+                                    .icon(IconName::FolderOpen)
+                                    .label("Show")
+                                    .on_click(move |_, _, cx| cx.open_with_system(&folder))
+                            })
+                            // An action keeps a notification up until it is
+                            // closed; a saved file is no reason to.
+                            .autohide(true);
+                        window.push_notification(notification, cx);
                     }
                 },
             ),

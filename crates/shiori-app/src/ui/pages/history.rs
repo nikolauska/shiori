@@ -108,8 +108,10 @@ impl TableDelegate for HistoryDelegate {
             PopupMenuItem::new("Remove...").on_click(move |_, window, cx| {
                 let model = model.clone();
                 actions::confirm(
-                    "Do you want to remove this entry from history?",
+                    "Remove this from history?",
                     String::new(),
+                    "Remove",
+                    actions::Risk::Danger,
                     window,
                     cx,
                     move |cx| model.update(cx, |model, cx| model.remove_history(item.id, cx)),
@@ -280,8 +282,10 @@ impl HistoryPage {
     fn clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let model = self.model.clone();
         actions::confirm(
-            "Do you want to clear your history?",
-            "All entries will be permanently removed.".to_owned(),
+            "Clear your history?",
+            "Every entry is removed for good.".to_owned(),
+            "Clear history",
+            actions::Risk::Danger,
             window,
             cx,
             move |cx| model.update(cx, |model, cx| model.clear_history(cx)),
@@ -292,8 +296,10 @@ impl HistoryPage {
         let model = self.model.clone();
         let service = model.read(cx).service_name();
         actions::confirm(
-            "Do you want to clear the sync queue?",
-            format!("Any changes not yet synchronized with {service} will be discarded."),
+            "Clear the sync queue?",
+            format!("Changes not yet sent to {service} are lost."),
+            "Clear queue",
+            actions::Risk::Danger,
             window,
             cx,
             move |cx| model.update(cx, |model, cx| model.clear_queue(cx)),

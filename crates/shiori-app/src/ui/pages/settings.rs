@@ -306,9 +306,10 @@ impl SettingsView {
             };
             let _ = cx.update(|window, cx| {
                 actions::confirm(
-                    "Restore this backup?",
-                    "It replaces your current list, which is saved first so you can go back."
-                        .to_owned(),
+                    format!("Restore {}?", list_location::file_name(&path)),
+                    "Your current list is saved first, so you can go back.".to_owned(),
+                    "Restore",
+                    actions::Risk::Safe,
                     window,
                     cx,
                     move |cx| model.update(cx, |model, cx| model.restore(path.clone(), cx)),
@@ -595,8 +596,10 @@ impl SettingsView {
                             let model = forget.clone();
                             let root = model.read(cx).state().title(s.root);
                             actions::confirm(
-                                "Forget this numbering?",
-                                format!("{root}. Your list and history are not changed."),
+                                format!("Forget the numbering of {root}?"),
+                                "Your list and history stay as they are.".to_owned(),
+                                "Forget",
+                                actions::Risk::Danger,
                                 window,
                                 cx,
                                 move |cx| {

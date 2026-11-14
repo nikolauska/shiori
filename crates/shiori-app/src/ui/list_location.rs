@@ -162,12 +162,31 @@ impl Model {
     /// Saves a backup where the user chose.
     pub fn back_up_to(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         match self.startup.state.back_up(&path) {
-            Ok(()) => self.set_status(format!("Backed up your list to {}.", path.display()), cx),
+            Ok(()) => self.saved("Backed up your list", &path, None, cx),
             Err(error) => {
                 tracing::error!("Could not back up to {}: {error:#}", path.display());
                 self.set_error(format!("Could not back up your list: {error:#}"), cx);
             }
         }
+    }
+
+    /// Tells the main window a file was written, by its name only; the
+    /// notification opens its folder.
+    pub(super) fn saved(
+        &mut self,
+        title: &str,
+        path: &std::path::Path,
+        detail: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let folder = path.parent().map(PathBuf::from).unwrap_or_default();
+        let detail = detail.unwrap_or_else(|| file_name(path));
+        self.set_status(format!("{title}: {}.", file_name(path)), cx);
+        cx.emit(super::model::UiRequest::Saved {
+            title: title.to_owned().into(),
+            detail: detail.into(),
+            folder,
+        });
     }
 
     /// Replaces the local list with a backup. The list as it was is saved
@@ -185,7 +204,7 @@ impl Model {
         match self.startup.state.restore(&path) {
             Ok(()) => {
                 self.list_replaced(cx);
-                self.set_status(format!("Restored your list from {}.", path.display()), cx);
+                self.set_status(format!("Restored your list from {}.", file_name(&path)), cx);
             }
             Err(error) => {
                 tracing::error!("Could not restore {}: {error:#}", path.display());
@@ -259,6 +278,14 @@ impl Model {
             },
         );
     }
+}
+
+/// A path as its file name, which is what people recognize.
+pub fn file_name(path: &std::path::Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// When the newest automatic backup was made, for Settings and the sidebar.

@@ -4,14 +4,15 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, ClipboardItem, Entity, Focusable as _, ParentElement as _, Styled as _,
-    Window,
+    App, AppContext as _, ClipboardItem, Entity, Focusable as _, ParentElement as _, SharedString,
+    Styled as _, Window, div, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
-use gpui_component::{WindowExt as _, h_flex};
+use gpui_component::{ActiveTheme as _, WindowExt as _, h_flex};
 use shiori_core::anime::MAX_EPISODE_COUNT;
 use shiori_core::entry::is_in_list;
 use shiori_core::{Anime, AnimeId, FuzzyDate, ListEntry, ListStatus};
@@ -21,7 +22,7 @@ use shiori_sync::anilist::score::rating_list;
 use super::library::PlayChoice;
 use super::model::Model;
 use super::tracker::Badge;
-use super::{format, inspector};
+use super::{format, inspector, poster};
 
 /// A menu item's action.
 pub type Handler = dyn Fn(&mut Window, &mut App);
@@ -510,6 +511,8 @@ fn ask_notes(model: &Entity<Model>, id: AnimeId, notes: String, window: &mut Win
     });
 }
 
+/// Asks before removing anime from the list. Their posters show which
+/// ones, since a row of covers is recognized faster than a list of titles.
 fn confirm_remove(
     model: &Entity<Model>,
     ids: Vec<AnimeId>,
@@ -517,37 +520,94 @@ fn confirm_remove(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let model = model.clone();
-    confirm(
-        "Do you want to remove selected items from your list?",
-        titles.to_owned(),
-        window,
-        cx,
-        move |cx| {
+    const SHOWN: usize = 6;
+    let (title, ok) = match ids.len() {
+        1 => (format!("Remove {titles}?"), "Remove".to_owned()),
+        n => (format!("Remove {n} anime?"), format!("Remove {n}")),
+    };
+    let on_ok = {
+        let model = model.clone();
+        let ids = ids.clone();
+        Rc::new(move |cx: &mut App| {
             model.update(cx, |model, cx| {
                 for &id in &ids {
                     model.remove_entry(id, cx);
                 }
             })
-        },
-    );
+        })
+    };
+    let model = model.clone();
+    window.open_alert_dialog(cx, move |alert, _, cx| {
+        let on_ok = on_ok.clone();
+        let more = ids.len().saturating_sub(SHOWN);
+        let posters = h_flex()
+            .gap_2()
+            .children(ids.iter().take(SHOWN).map(|&id| {
+                div()
+                    .w(px(40.))
+                    .h(px(56.))
+                    .flex_none()
+                    .rounded_sm()
+                    .overflow_hidden()
+                    .child(poster::view(&model, id, cx))
+            }))
+            .when(more > 0, |row| {
+                row.child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("+{more}")),
+                )
+            });
+        alert
+            .confirm()
+            .title(title.clone())
+            .description(posters)
+            .ok_text(ok.clone())
+            .ok_variant(ButtonVariant::Danger)
+            .on_ok(move |_, _, cx| {
+                on_ok(cx);
+                true
+            })
+    });
 }
 
-/// Asks a yes or no question; `on_ok` runs on yes.
+/// How a confirmation's OK button looks: `Danger` for what cannot be
+/// undone, so the button warns before the words are read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Risk {
+    Safe,
+    Danger,
+}
+
+/// Asks a yes or no question. The OK button names the action, such as
+/// "Clear history", so the answer is clear without reading the question.
+/// `on_ok` runs on yes.
 pub fn confirm(
-    title: &'static str,
+    title: impl Into<SharedString>,
     description: String,
+    ok: &'static str,
+    risk: Risk,
     window: &mut Window,
     cx: &mut App,
     on_ok: impl Fn(&mut App) + 'static,
 ) {
+    let title = title.into();
     let on_ok = Rc::new(on_ok);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let on_ok = on_ok.clone();
         alert
             .confirm()
-            .title(title)
-            .description(description.clone())
+            .title(title.clone())
+            .when(!description.is_empty(), |alert| {
+                alert.description(description.clone())
+            })
+            .ok_text(ok)
+            .ok_variant(if risk == Risk::Danger {
+                ButtonVariant::Danger
+            } else {
+                ButtonVariant::Primary
+            })
             .on_ok(move |_, _, cx| {
                 on_ok(cx);
                 true

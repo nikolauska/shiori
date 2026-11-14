@@ -406,14 +406,11 @@ impl LibraryPage {
 
     fn delete(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) {
         let model = self.model.clone();
-        let title = if row.folder {
-            "Do you want to delete this folder?"
-        } else {
-            "Do you want to delete this file?"
-        };
         actions::confirm(
-            title,
-            format!("{} will be moved to the trash.", row.name),
+            format!("Move {} to the trash?", row.name),
+            String::new(),
+            "Move to trash",
+            actions::Risk::Danger,
             window,
             cx,
             move |cx| {
