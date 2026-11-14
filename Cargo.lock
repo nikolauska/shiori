@@ -6665,6 +6665,7 @@ name = "shiori-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "embed-resource",
  "fastrand",
  "gpui-component",
  "gpui-kit-assets",
