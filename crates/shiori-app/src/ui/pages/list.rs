@@ -47,6 +47,7 @@ impl ListPage {
                         | AppEvent::AnimeDeleted { .. }
                         | AppEvent::AnimeSettingsUpdated(_)
                         | AppEvent::ListFetched
+                        | AppEvent::ListReplaced
                         | AppEvent::SettingsChanged
                 ) {
                     this.update_rows(cx);

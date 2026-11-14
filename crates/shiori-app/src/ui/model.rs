@@ -43,7 +43,7 @@ pub struct Model {
     http: reqwest::Client,
     pub status: Status,
     /// Synchronize is running; a second click waits for it.
-    syncing: bool,
+    pub(super) syncing: bool,
     pub posters: Posters,
     pub session: Session,
     /// A session write is scheduled.
@@ -119,7 +119,7 @@ impl Model {
         self.startup.state.service.name()
     }
 
-    fn account(&self) -> Account {
+    pub(super) fn account(&self) -> Account {
         self.startup.account().unwrap_or_else(|error| {
             tracing::error!("Could not read the token: {error:#}");
             Account {
@@ -310,11 +310,15 @@ impl Model {
     /// when the password was left as it was.
     pub fn apply_settings(
         &mut self,
-        settings: Settings,
+        mut settings: Settings,
         proxy_password: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let before = self.state().settings.clone();
+        // Where the list lives changes only with `move_list`, which also
+        // opens the other database; a settings draft made before a move
+        // must not undo it.
+        settings.list = before.list;
         if let Err(error) = self.startup.settings_file.save(&settings) {
             self.set_error(format!("Could not save settings: {error:#}"), cx);
             return;
@@ -551,7 +555,8 @@ impl Model {
     // ---- Synchronize --------------------------------------------------------
 
     pub fn synchronize(&mut self, cx: &mut Context<Self>) {
-        if self.syncing {
+        // A local list has no service to synchronize with.
+        if self.syncing || self.state().is_local() {
             return;
         }
         self.syncing = true;

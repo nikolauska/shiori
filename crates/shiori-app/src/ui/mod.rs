@@ -7,6 +7,7 @@ mod icons;
 mod inspector;
 mod library;
 mod link_picker;
+mod list_location;
 mod main_window;
 mod model;
 mod now_playing;
@@ -144,8 +145,19 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
         start_tracking(&model, cx);
 
         tracing::debug!("Opening the main window");
-        if show_main_window(&model, cx).is_none() {
+        let Some(main_window) = show_main_window(&model, cx) else {
             cx.quit();
+            return;
+        };
+        if list_location::should_ask(model.read(cx)) {
+            // Asked instead of the start-up sync, which would only say that
+            // no account is set up.
+            let model = model.clone();
+            let _ = main_window.update(cx, |_, window, cx| {
+                window.defer(cx, move |window, cx| {
+                    list_location::ask_first(&model, window, cx)
+                })
+            });
             return;
         }
         // Start-up sync, when there is an account to sync with.

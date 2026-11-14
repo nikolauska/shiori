@@ -1,5 +1,6 @@
 //! The history page: watched episodes, newest first, and the sync queue.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, SharedString,
     Styled, Subscription, Window, div,
@@ -294,6 +295,8 @@ impl Render for HistoryPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let history_count = self.history.read(cx).delegate().rows.len();
         let queue_count = self.queue.read(cx).delegate().rows.len();
+        // A local list never queues anything.
+        let local = self.model.read(cx).state().is_local();
         let clear_history = Button::new("clear-history")
             .ghost()
             .label("Clear history...")
@@ -313,12 +316,14 @@ impl Render for HistoryPage {
                     .min_h_0()
                     .child(DataTable::new(&self.history).stripe(true)),
             )
-            .child(heading("Sync queue", queue_count, clear_queue, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(DataTable::new(&self.queue).stripe(true)),
-            )
+            .when(!local, |page| {
+                page.child(heading("Sync queue", queue_count, clear_queue, cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .child(DataTable::new(&self.queue).stripe(true)),
+                    )
+            })
     }
 }

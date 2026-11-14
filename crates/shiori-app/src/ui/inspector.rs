@@ -232,6 +232,8 @@ impl Inspector {
             }
             AppEvent::AnimeSettingsUpdated(id) if *id == shown => self.load_settings(window, cx),
             AppEvent::AnimeDeleted { id, .. } if *id == shown => self.id = None,
+            // The anime may not even be in the list that was opened.
+            AppEvent::ListReplaced => self.id = None,
             _ => {}
         }
         cx.notify();
@@ -703,7 +705,11 @@ impl Inspector {
                     .pt_2()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child("Changes save as you make them and sync in the background."),
+                    .child(if self.model.read(cx).state().is_local() {
+                        "Changes save as you make them."
+                    } else {
+                        "Changes save as you make them and sync in the background."
+                    }),
             )
             .into_any_element()
     }

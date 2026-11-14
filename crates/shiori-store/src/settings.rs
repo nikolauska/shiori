@@ -19,6 +19,15 @@ pub enum ColorScheme {
     Dark,
 }
 
+/// Where the anime list lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListLocation {
+    /// Only in Shiori's own database; nothing is sent to a service.
+    Local,
+    /// In an account on the list service, synchronized.
+    Account,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProxyKind {
     #[default]
@@ -39,6 +48,8 @@ pub struct ProxySettings {
 pub struct Settings {
     pub color_scheme: ColorScheme,
     pub service: ServiceId,
+    /// `None` until the user has chosen; Shiori asks on start until then.
+    pub list: Option<ListLocation>,
     pub sync_enabled: bool,
     pub library_folders: Vec<PathBuf>,
     pub title_language: TitleLanguage,
@@ -64,6 +75,7 @@ impl Default for Settings {
         Self {
             color_scheme: ColorScheme::System,
             service: ServiceId::AniList,
+            list: None,
             sync_enabled: true,
             library_folders: Vec::new(),
             title_language: TitleLanguage::Romaji,
@@ -148,6 +160,11 @@ fn read(doc: &DocumentMut) -> Settings {
             Some("kitsu") => ServiceId::Kitsu,
             _ => d.service,
         },
+        list: match str_at("sync.list") {
+            Some("local") => Some(ListLocation::Local),
+            Some("account") => Some(ListLocation::Account),
+            _ => d.list,
+        },
         sync_enabled: bool_at("sync.enabled", d.sync_enabled),
         library_folders: list_at("library.folders")
             .into_iter()
@@ -208,6 +225,16 @@ fn write(doc: &mut DocumentMut, s: &Settings) {
         ),
     );
     set("sync.service", Some(service_key(s.service).into()));
+    set(
+        "sync.list",
+        s.list.map(|list| {
+            match list {
+                ListLocation::Local => "local",
+                ListLocation::Account => "account",
+            }
+            .into()
+        }),
+    );
     set("sync.enabled", Some(s.sync_enabled.into()));
     set(
         "library.folders",
@@ -340,6 +367,7 @@ mod tests {
         Settings {
             color_scheme: ColorScheme::Dark,
             service: ServiceId::Kitsu,
+            list: Some(ListLocation::Local),
             sync_enabled: false,
             library_folders: vec!["/media/anime".into(), "D:\\Anime".into()],
             title_language: TitleLanguage::Native,

@@ -15,7 +15,7 @@ pub use folders::{Folders, service_key};
 pub use secrets::{SecretKey, Secrets};
 pub use session::{ListView, SearchFilters, Session, ViewMode, WindowGeometry};
 pub use settings::{
-    ColorScheme, ProxyKind, ProxySettings, Settings, SettingsFile, UPDATE_DELAY_RANGE,
+    ColorScheme, ListLocation, ProxyKind, ProxySettings, Settings, SettingsFile, UPDATE_DELAY_RANGE,
 };
 
 #[derive(Debug, thiserror::Error)]

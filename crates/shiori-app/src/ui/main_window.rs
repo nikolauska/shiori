@@ -238,36 +238,47 @@ impl MainWindow {
     ) -> PopupMenu {
         let settings = &model.read(cx).state().settings;
         let (sync_on, detection_on) = (settings.sync_enabled, settings.detection_enabled);
+        let local = model.read(cx).state().is_local();
         let service = model.read(cx).service_name();
         let m = model.clone();
         let m2 = model.clone();
         let m3 = model.clone();
         let v1 = view.clone();
         let v2 = view.clone();
+        // A local list has nothing to synchronize with.
+        let menu = if local {
+            menu
+        } else {
+            menu.item(
+                PopupMenuItem::new(format!("Synchronize with {service}"))
+                    .on_click(move |_, _, cx| m.update(cx, |model, cx| model.synchronize(cx))),
+            )
+            .separator()
+        };
+        let menu = menu
+            .item(PopupMenuItem::new("Play next episode").on_click({
+                let m = model.clone();
+                move |_, _, cx| m.update(cx, |model, cx| model.play_selected_next(cx))
+            }))
+            .item(PopupMenuItem::new("Play random anime").on_click({
+                let m = model.clone();
+                move |_, _, cx| m.update(cx, |model, cx| model.play_random_anime(cx))
+            }))
+            .separator();
+        let menu = if local {
+            menu
+        } else {
+            menu.item(
+                PopupMenuItem::new("Enable synchronization")
+                    .checked(sync_on)
+                    .on_click(move |_, _, cx| {
+                        m2.update(cx, |model, cx| {
+                            model.toggle_setting(|s| s.sync_enabled = !s.sync_enabled, cx)
+                        })
+                    }),
+            )
+        };
         menu.item(
-            PopupMenuItem::new(format!("Synchronize with {service}"))
-                .on_click(move |_, _, cx| m.update(cx, |model, cx| model.synchronize(cx))),
-        )
-        .separator()
-        .item(PopupMenuItem::new("Play next episode").on_click({
-            let m = model.clone();
-            move |_, _, cx| m.update(cx, |model, cx| model.play_selected_next(cx))
-        }))
-        .item(PopupMenuItem::new("Play random anime").on_click({
-            let m = model.clone();
-            move |_, _, cx| m.update(cx, |model, cx| model.play_random_anime(cx))
-        }))
-        .separator()
-        .item(
-            PopupMenuItem::new("Enable synchronization")
-                .checked(sync_on)
-                .on_click(move |_, _, cx| {
-                    m2.update(cx, |model, cx| {
-                        model.toggle_setting(|s| s.sync_enabled = !s.sync_enabled, cx)
-                    })
-                }),
-        )
-        .item(
             PopupMenuItem::new("Enable detection")
                 .checked(detection_on)
                 .on_click(move |_, _, cx| {
@@ -320,7 +331,10 @@ impl MainWindow {
             .collect();
         let new_count = continue_watching(state).len();
         let account = &state.accounts.anilist;
-        let (who, how) = if account.username.is_empty() {
+        let local = state.is_local();
+        let (who, how) = if local {
+            ("On this computer".to_owned(), "Local list".to_owned())
+        } else if account.username.is_empty() {
             (
                 "Not signed in".to_owned(),
                 "Add AniList in Settings".to_owned(),
@@ -485,7 +499,19 @@ impl MainWindow {
                             .size(px(26.))
                             .flex_none()
                             .rounded_full()
-                            .bg(style::gradient()),
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .map(|avatar| {
+                                if local {
+                                    avatar
+                                        .bg(cx.theme().muted)
+                                        .text_color(muted)
+                                        .child(Icon::new(AppIcon::House).small())
+                                } else {
+                                    avatar.bg(style::gradient())
+                                }
+                            }),
                     )
                     .child(
                         v_flex()
@@ -514,13 +540,17 @@ impl MainWindow {
         let model = self.model.read(cx);
         let status = &model.status;
         let service = model.service_name();
+        let local = model.state().is_local();
         let theme = cx.theme();
         let color = if status.is_error {
             theme.danger
         } else {
             theme.muted_foreground
         };
-        let (dot, state) = if status.busy {
+        let (dot, state) = if local {
+            // Nothing is synchronized, so there is no sync state to report.
+            (theme.border, "Local".to_owned())
+        } else if status.busy {
             (theme.warning, format!("Synchronizing with {service}"))
         } else if status.is_error {
             (theme.danger, "Not synchronized".to_owned())
@@ -550,17 +580,19 @@ impl MainWindow {
             })
             .child(div().size(px(7.)).rounded_full().bg(dot))
             .child(div().text_color(theme.muted_foreground).child(state))
-            .child(
-                Button::new("sync")
-                    .xsmall()
-                    .ghost()
-                    .icon(IconName::RefreshCw)
-                    .tooltip(format!("Synchronize with {service} (Ctrl+S)"))
-                    .loading(status.busy)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.synchronize(&Synchronize, window, cx)
-                    })),
-            )
+            .when(!local, |bar| {
+                bar.child(
+                    Button::new("sync")
+                        .xsmall()
+                        .ghost()
+                        .icon(IconName::RefreshCw)
+                        .tooltip(format!("Synchronize with {service} (Ctrl+S)"))
+                        .loading(status.busy)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.synchronize(&Synchronize, window, cx)
+                        })),
+                )
+            })
     }
 }
 

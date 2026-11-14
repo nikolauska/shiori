@@ -12,7 +12,7 @@ use shiori_core::anime::preferred_title;
 use shiori_core::entry::changed_fields;
 use shiori_core::recognition::{Numbering, NumberingSequence, TitleIndex, link_title};
 use shiori_core::{Anime, AnimeId, AnimeSettings, FuzzyDate, HistoryItem, ListEntry, ServiceId};
-use shiori_store::{Accounts, Database, Settings};
+use shiori_store::{Accounts, Database, ListLocation, Settings};
 use shiori_sync::queue::{Reconcile, Step};
 use shiori_sync::sync::entries_to_prune;
 use shiori_sync::{AccountInfo, FetchedList, SavedEntry, ServiceError, SyncQueue};
@@ -37,6 +37,9 @@ pub enum AppEvent {
     QueuedWhileSignedOut(AnimeId),
     AuthenticationChanged(bool),
     ListFetched,
+    /// Another list was opened (the user moved it between this computer and
+    /// an account); everything shown may differ.
+    ListReplaced,
     ServiceError(String),
 }
 
@@ -79,6 +82,11 @@ impl AppState {
         })
     }
 
+    /// The list lives on this computer only: nothing is queued or sent.
+    pub fn is_local(&self) -> bool {
+        self.settings.list == Some(ListLocation::Local)
+    }
+
     /// The title to show, or the id when the anime is not known yet.
     pub fn title(&self, id: AnimeId) -> String {
         match self.anime.get(&id) {
@@ -116,7 +124,8 @@ impl AppState {
         self.db.upsert_entries(std::slice::from_ref(&entry))?;
         self.entries.insert(id, entry);
         let mut events = vec![AppEvent::EntryUpdated(id)];
-        if !dirty.is_empty() {
+        // A local list has no service to tell, so a queue would only grow.
+        if !dirty.is_empty() && !self.is_local() {
             let item = self.queue.push(id, dirty, now).clone();
             self.db.upsert_queue_item(&item)?;
             events.extend(self.queued_events(id));
@@ -127,6 +136,15 @@ impl AppState {
     /// Marks an entry for deletion; it disappears locally once the service
     /// confirms.
     pub fn remove_entry(&mut self, id: AnimeId, now: Timestamp) -> Result<Vec<AppEvent>> {
+        if !self.entries.contains_key(&id) {
+            return Ok(Vec::new());
+        }
+        // Nothing has to confirm a local removal, so it happens at once.
+        if self.is_local() {
+            self.db.delete_entry(id)?;
+            self.entries.remove(&id);
+            return Ok(vec![AppEvent::EntryDeleted(id)]);
+        }
         let Some(entry) = self.entries.get_mut(&id) else {
             return Ok(Vec::new());
         };
@@ -380,6 +398,12 @@ impl AppState {
         Ok(vec![AppEvent::NumberingChanged])
     }
 
+    /// Writes this list to `path` as a list kept on this computer only.
+    pub fn copy_as_local(&self, path: &std::path::Path) -> Result<()> {
+        self.db.copy_as_local(path)?;
+        Ok(())
+    }
+
     /// What is in the database, to check that changes were written through.
     #[cfg(test)]
     pub fn stored(&self) -> shiori_store::Loaded {
@@ -446,6 +470,27 @@ mod tests {
         state.clear_history().unwrap();
         assert!(state.history.is_empty());
         assert!(state.stored().history.is_empty());
+    }
+
+    #[test]
+    fn a_local_list_saves_and_removes_without_queuing() {
+        let mut state = state();
+        state.settings.list = Some(ListLocation::Local);
+        state.store_anime(vec![Anime::new(AnimeId(1))]).unwrap();
+        let mut entry = ListEntry::new(AnimeId(1));
+        entry.watched_episodes = 2;
+        let events = state.save_entry(entry, Timestamp::UNIX_EPOCH).unwrap();
+        assert_eq!(events, [AppEvent::EntryUpdated(AnimeId(1))]);
+        assert!(state.queue.is_empty());
+        assert_eq!(state.stored().entries[&AnimeId(1)].watched_episodes, 2);
+
+        let events = state
+            .remove_entry(AnimeId(1), Timestamp::UNIX_EPOCH)
+            .unwrap();
+        assert_eq!(events, [AppEvent::EntryDeleted(AnimeId(1))]);
+        assert!(state.entries.is_empty());
+        assert!(state.stored().entries.is_empty());
+        assert!(state.stored().queue.is_empty());
     }
 
     #[test]

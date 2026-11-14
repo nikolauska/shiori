@@ -4,6 +4,18 @@
 
 Shiori works with AniList, MyAnimeList and Kitsu. One of them is active at a time. Each service has its own separate copy of your list inside Shiori; switching the active service switches to that copy and does not move anything between services.
 
+## Keeping your list on this computer
+
+You don't need an account. On first start, without one, Shiori asks where your list should live: on this computer, or in your AniList account. You can change it later in Settings.
+
+A list on this computer:
+
+- Is saved as you change it, and that's all. Nothing is queued or sent, and Shiori never mentions synchronizing.
+- Removes an anime at once when you remove it.
+- Still gets anime information (titles, episodes, airing times, posters) from AniList, the same way searching does. Those requests carry anime ids or search words, nothing about you.
+
+It is kept apart from your AniList list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens your AniList list as you left it, and the list on this computer stays, so you can switch back.
+
 ## Signing in
 
 | Service | How you sign in |

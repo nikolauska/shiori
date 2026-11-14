@@ -81,6 +81,26 @@ impl Database {
         Ok(())
     }
 
+    /// Writes a copy of the list for keeping it on this computer only: the
+    /// sync queue is left out, and so are entries whose removal was waiting
+    /// to be sent, since a local list has nowhere to send it and removes at
+    /// once. `path` must not exist yet.
+    pub fn copy_as_local(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // VACUUM INTO makes a consistent copy even while this connection has
+        // uncheckpointed WAL pages, which copying the file would miss.
+        self.conn
+            .execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])?;
+        let copy = Self::open(path)?;
+        let tx = copy.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM queue", [])?;
+        tx.execute("DELETE FROM anime_list WHERE pending_delete", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn schema_version(&self) -> Result<usize> {
         let version: i64 = self
             .conn

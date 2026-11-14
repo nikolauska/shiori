@@ -327,3 +327,35 @@ fn queue_round_trip() {
     db.clear_queue().unwrap();
     assert!(db.load_all().unwrap().queue.is_empty());
 }
+
+#[test]
+fn a_local_copy_leaves_out_the_queue_and_waiting_removals() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(&dir.path().join("anilist.sqlite")).unwrap();
+    db.upsert_anime(&[full_anime(1), full_anime(2)]).unwrap();
+    let kept = ListEntry {
+        pending_delete: false,
+        ..full_entry(1)
+    };
+    // full_entry is waiting to be removed.
+    db.upsert_entries(&[kept.clone(), full_entry(2)]).unwrap();
+    db.upsert_queue_item(&QueueItem {
+        anime_id: AnimeId(1),
+        dirty: Fields::EPISODE,
+        time: ts(100),
+        retry_count: 0,
+        last_error: None,
+    })
+    .unwrap();
+    db.add_history(AnimeId(1), 12, ts(100)).unwrap();
+
+    let path = dir.path().join("local.sqlite");
+    db.copy_as_local(&path).unwrap();
+    let copy = Database::open(&path).unwrap().load_all().unwrap();
+    assert_eq!(copy.anime.len(), 2);
+    assert_eq!(copy.entries.into_values().collect::<Vec<_>>(), [kept]);
+    assert!(copy.queue.is_empty());
+    assert_eq!(copy.history.len(), 1);
+    // The original is untouched.
+    assert_eq!(db.load_all().unwrap().queue.len(), 1);
+}

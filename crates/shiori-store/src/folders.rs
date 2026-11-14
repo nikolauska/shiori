@@ -87,6 +87,12 @@ impl Folders {
         self.data.join(format!("{}.sqlite", service_key(service)))
     }
 
+    /// The list kept on this computer only. It is apart from the services'
+    /// copies so that signing in later never mixes the two.
+    pub fn local_database_file(&self) -> PathBuf {
+        self.data.join("local.sqlite")
+    }
+
     pub fn logs(&self) -> PathBuf {
         self.data.join("logs")
     }
@@ -124,6 +130,10 @@ mod tests {
         assert_eq!(
             f.database_file(ServiceId::MyAnimeList),
             PathBuf::from("/x/data/myanimelist.sqlite")
+        );
+        assert_eq!(
+            f.local_database_file(),
+            PathBuf::from("/x/data/local.sqlite")
         );
         assert_eq!(
             f.poster_folder(ServiceId::AniList),

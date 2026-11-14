@@ -8,17 +8,18 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputState};
+use gpui_component::radio::{Radio, RadioGroup};
 use gpui_component::select::{Select, SelectState};
 use gpui_component::{
     ActiveTheme as _, IndexPath, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
 use shiori_core::{AnimeId, TitleLanguage, UpdateTrigger};
-use shiori_store::{ColorScheme, ProxyKind, Settings, UPDATE_DELAY_RANGE};
+use shiori_store::{ColorScheme, ListLocation, ProxyKind, Settings, UPDATE_DELAY_RANGE};
 use shiori_sync::anilist;
 
 use crate::ui::model::Model;
 use crate::ui::widgets::Choice;
-use crate::ui::{actions, format, numbering_editor};
+use crate::ui::{actions, format, list_location, numbering_editor};
 
 const SECTIONS: [&str; 8] = [
     "Accounts",
@@ -438,7 +439,8 @@ impl SettingsView {
         let d = &self.draft;
         match self.section {
             0 => {
-                let state = self.model.read(cx).state();
+                let model = self.model.read(cx);
+                let state = model.state();
                 let account = &state.accounts.anilist;
                 let who = if account.username.is_empty() {
                     "Not signed in.".to_owned()
@@ -447,36 +449,59 @@ impl SettingsView {
                 } else {
                     format!("Account: {}.", account.username)
                 };
+                // Before the user has chosen, an existing account means the
+                // list is already the account's.
+                let selected = match state.settings.list {
+                    Some(ListLocation::Local) => Some(0),
+                    Some(ListLocation::Account) => Some(1),
+                    None => model.has_account().then_some(1),
+                };
+                let local = state.is_local();
+                let handle = self.model.clone();
+                let location = RadioGroup::vertical("list-location")
+                    .child(Radio::new("local").label("On this computer"))
+                    .child(Radio::new("account").label("In my AniList account"))
+                    .selected_index(selected)
+                    .on_click(move |ix, window, cx| {
+                        let to = if *ix == 0 {
+                            ListLocation::Local
+                        } else {
+                            ListLocation::Account
+                        };
+                        list_location::change(&handle, to, window, cx);
+                    });
                 v_flex()
                     .gap_3()
-                    .child(label("Service"))
-                    // MyAnimeList and Kitsu come with phase 8.
-                    .child(div().child(state.service.name()))
-                    .child(self.checkbox(
-                        "sync",
-                        "Enable synchronization",
-                        d.sync_enabled,
-                        |s, v| s.sync_enabled = v,
-                        cx,
-                    ))
-                    .child(label("AniList account"))
-                    .child(div().child(who))
-                    .child(div().text_sm().child(
-                        "Click Authorize, approve Shiori on AniList, then paste the token it shows here.",
-                    ))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Button::new("authorize")
-                                    .label("Authorize")
-                                    .on_click(|_, _, cx| cx.open_url(&anilist::authorize_url())),
-                            )
-                            .child(div().flex_1().child(Input::new(&self.token)))
-                            .child(Button::new("sign-in").label("Sign in").on_click(
-                                cx.listener(|this, _, window, cx| this.sign_in(window, cx)),
-                            )),
-                    )
+                    .child(label("Where your list lives"))
+                    .child(location)
+                    // Syncing and signing in mean nothing for a local list.
+                    .when(!local, |el| {
+                        el.child(self.checkbox(
+                            "sync",
+                            "Enable synchronization",
+                            d.sync_enabled,
+                            |s, v| s.sync_enabled = v,
+                            cx,
+                        ))
+                        .child(label("AniList account"))
+                        .child(div().child(who))
+                        .child(div().text_sm().child(
+                            "Click Authorize, approve Shiori on AniList, then paste the token it shows here.",
+                        ))
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("authorize")
+                                        .label("Authorize")
+                                        .on_click(|_, _, cx| cx.open_url(&anilist::authorize_url())),
+                                )
+                                .child(div().flex_1().child(Input::new(&self.token)))
+                                .child(Button::new("sign-in").label("Sign in").on_click(
+                                    cx.listener(|this, _, window, cx| this.sign_in(window, cx)),
+                                )),
+                        )
+                    })
                     .into_any_element()
             }
             1 => {

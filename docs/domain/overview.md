@@ -2,7 +2,7 @@
 
 ## What Shiori is
 
-Shiori is a desktop app for people who keep an anime list on AniList, MyAnimeList or Kitsu and watch anime on their computer.
+Shiori is a desktop app for people who watch anime on their computer and keep a list of it: on AniList, MyAnimeList or Kitsu, or only on their computer.
 
 It notices when you play an episode, works out which series and episode it is, and updates your list for you. You can also manage the list by hand, search for anime, and start the next episode of a series from inside the app.
 
@@ -38,6 +38,7 @@ Every few seconds Shiori looks for a media player it knows. If one is playing a 
 - A history of what you watched.
 - One list service active at a time: AniList, MyAnimeList or Kitsu.
 - Working offline: changes are kept and sent later.
+- Keeping your list on this computer only, without an account.
 - Exporting your list as a text document.
 
 ## What it does not include yet
