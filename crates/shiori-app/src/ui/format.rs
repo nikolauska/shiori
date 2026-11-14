@@ -41,6 +41,23 @@ pub fn airing_label(anime: &Anime, today_in_japan: jiff::civil::Date) -> &'stati
     }
 }
 
+/// The start of a text, for showing folded: the first paragraph, cut at a
+/// word near `limit` characters with "…" when it is longer.
+pub fn opening(text: &str, limit: usize) -> String {
+    let first = text
+        .trim()
+        .split("\n")
+        .find(|p| !p.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+    if first.chars().count() <= limit {
+        return first.to_owned();
+    }
+    let cut: String = first.chars().take(limit).collect();
+    let cut = cut.rsplit_once(' ').map_or(cut.as_str(), |(head, _)| head);
+    format!("{}…", cut.trim_end_matches([',', ';', ':', ' ']))
+}
+
 /// A synopsis as plain text. Services send some HTML: line breaks become
 /// new lines, other tags are dropped, and the common entities are decoded.
 pub fn plain_text(html: &str) -> String {
@@ -191,5 +208,11 @@ mod tests {
             "A story of \"Tom & Jerry\".\n\n(Source: AniList)"
         );
         assert_eq!(plain_text("1 < 2"), "1 < 2");
+    }
+
+    #[test]
+    fn opening_keeps_the_first_paragraph_and_cuts_at_a_word() {
+        assert_eq!(opening("\nShort one.\n\nSecond.", 50), "Short one.");
+        assert_eq!(opening("one two three four", 12), "one two…");
     }
 }

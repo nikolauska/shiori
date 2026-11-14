@@ -10,28 +10,33 @@ use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement,
     PathPromptOptions, Render, SharedString, Styled, Subscription, Window, div, prelude::*, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::checkbox::Checkbox;
+use gpui_component::button::{Button, ButtonGroup, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_component::rating::Rating;
 use gpui_component::select::{Select, SelectEvent, SelectState};
+use gpui_component::switch::Switch;
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{
-    ActiveTheme as _, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _, StyledExt as _,
+    WindowExt as _, h_flex, v_flex,
 };
 use jiff::Timestamp;
 use shiori_core::anime::{MAX_EPISODE_COUNT, is_stale};
 use shiori_core::entry::is_in_list;
 use shiori_core::recognition::normalize;
 use shiori_core::{AnimeId, AnimeSettings, FuzzyDate, ListEntry, ListStatus};
-use shiori_sync::anilist::score::rating_list;
+use std::time::Duration;
+
+use shiori_sync::anilist::score::{ScoreFormat, rating_list};
 
 use shiori_app::list_view::{airing_label, new_episodes};
 use shiori_app::state::AppEvent;
 
+use super::icons::{self, AppIcon};
 use super::library::PlayChoice;
 use super::model::Model;
 use super::widgets::Choice;
-use super::{format, now_playing, numbering_editor, poster, style};
+use super::{format, now_playing, numbering_editor, poster, style, widgets};
 
 /// Shows an anime: selects it, and the main window brings up the inspector
 /// or the full page. Old data is fetched again on the way.
@@ -56,15 +61,29 @@ pub fn fetch_if_stale(model: &Entity<Model>, id: AnimeId, cx: &mut App) {
     }
 }
 
-type StatusSelect = SelectState<Vec<Choice<ListStatus>>>;
 type ScoreSelect = SelectState<Vec<Choice<u8>>>;
 
-fn status_choices() -> Vec<Choice<ListStatus>> {
-    ListStatus::SHOWN
-        .iter()
-        .map(|&status| Choice::new(format::status_label(status), status))
-        .collect()
+/// The scores a row of stars stands for, lowest star first, when the score
+/// format has few enough steps for stars. Finer formats keep the menu,
+/// because whole stars would round away what the user picked.
+fn star_scores(format: ScoreFormat) -> Option<Vec<u8>> {
+    match format {
+        ScoreFormat::Point10 | ScoreFormat::Point5 => Some(
+            rating_list(format)
+                .into_iter()
+                .map(|r| r.value)
+                .filter(|&v| v > 0)
+                .collect(),
+        ),
+        _ => None,
+    }
 }
+
+/// About three lines of the inspector: how much synopsis shows folded.
+const SYNOPSIS_FOLDED: usize = 200;
+
+/// How long "Saved" stays after an edit.
+const SAVED_FOR: Duration = Duration::from_secs(2);
 
 /// Index of the Now playing tab, after List, Details and Settings.
 const NOW_PLAYING_TAB: usize = 3;
@@ -75,7 +94,6 @@ pub struct Inspector {
     id: Option<AnimeId>,
     tab: usize,
     // List tab
-    status: Entity<StatusSelect>,
     watched: Entity<InputState>,
     score: Entity<ScoreSelect>,
     started: Entity<InputState>,
@@ -93,6 +111,14 @@ pub struct Inspector {
     /// save must go to the anime the text belongs to, not the shown one.
     entry_for: Option<AnimeId>,
     settings_for: Option<AnimeId>,
+    /// Edits made since this many saves ago show "Saved" for a moment;
+    /// the counter lets a later edit keep it up past an earlier timer.
+    saves: usize,
+    saved_shown: bool,
+    /// The Details tab shows a few tags and three lines of synopsis until
+    /// asked for the rest; another anime starts folded again.
+    tags_open: bool,
+    synopsis_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -114,7 +140,6 @@ impl Inspector {
                 )
             })
             .collect();
-        let status = cx.new(|cx| SelectState::new(status_choices(), None, window, cx));
         let score = cx.new(|cx| SelectState::new(ratings, None, window, cx));
         let watched = text("0", window, cx);
         let started = text("YYYY-MM-DD", window, cx);
@@ -135,17 +160,6 @@ impl Inspector {
                 cx.notify();
             }),
             cx.subscribe_in(&model, window, Self::on_event),
-            cx.subscribe_in(
-                &status,
-                window,
-                |this, _, event: &SelectEvent<_>, window, cx| {
-                    if let SelectEvent::Confirm(Some(status)) = event {
-                        let status = *status;
-                        // Choosing a status of an anime not in the list adds it.
-                        this.save_or_add(window, cx, |e| e.status = status);
-                    }
-                },
-            ),
             cx.subscribe_in(
                 &score,
                 window,
@@ -196,7 +210,6 @@ impl Inspector {
             model,
             id,
             tab: 0,
-            status,
             watched,
             score,
             started,
@@ -209,6 +222,10 @@ impl Inspector {
             loading: false,
             entry_for: None,
             settings_for: None,
+            saves: 0,
+            saved_shown: false,
+            tags_open: false,
+            synopsis_open: false,
             _subscriptions: subscriptions,
         };
         inspector.reload(window, cx);
@@ -247,6 +264,8 @@ impl Inspector {
     }
 
     fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tags_open = false;
+        self.synopsis_open = false;
         self.load_entry(window, cx);
         self.load_settings(window, cx);
     }
@@ -272,7 +291,6 @@ impl Inspector {
         self.loading = true;
         self.entry_for = Some(id);
         let entry = self.entry(cx);
-        let in_list = entry.is_some();
         let entry = entry.unwrap_or_else(|| ListEntry::new(id));
         let set = |input: &Entity<InputState>, value: String, window: &mut Window, cx: &mut App| {
             input.update(cx, |input, cx| input.set_value(value, window, cx));
@@ -303,16 +321,6 @@ impl Inspector {
         );
         self.notes.update(cx, |input, cx| {
             input.set_value(entry.notes.clone(), window, cx)
-        });
-        // Something has to be chosen to add an anime; planning to watch it
-        // is the usual first step.
-        let status = if in_list {
-            entry.status
-        } else {
-            ListStatus::PlanToWatch
-        };
-        self.status.update(cx, |select, cx| {
-            select.set_selected_value(&status, window, cx)
         });
         self.score.update(cx, |select, cx| {
             select.set_selected_value(&entry.score, window, cx)
@@ -363,33 +371,43 @@ impl Inspector {
         change(&mut entry);
         self.model
             .update(cx, |model, cx| model.save_entry(entry, cx));
+        self.show_saved(cx);
     }
 
-    fn save_or_add(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        change: impl FnOnce(&mut ListEntry),
-    ) {
-        if self.entry(cx).is_some() {
-            self.save(window, cx, change);
-        }
-    }
-
-    fn add_to_list(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    /// Choosing a status of an anime not in the list adds it with that
+    /// status.
+    fn set_status(&mut self, status: ListStatus, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.id else {
             return;
         };
-        let status = self
-            .status
-            .read(cx)
-            .selected_value()
-            .copied()
-            .unwrap_or(ListStatus::PlanToWatch);
+        if self.entry(cx).is_some() {
+            self.save(window, cx, |e| e.status = status);
+            return;
+        }
         let mut entry = ListEntry::new(id);
         entry.status = status;
         self.model
             .update(cx, |model, cx| model.save_entry(entry, cx));
+        self.show_saved(cx);
+    }
+
+    /// Edits save at once, so instead of a standing note saying so, a short
+    /// "Saved" confirms each one.
+    fn show_saved(&mut self, cx: &mut Context<Self>) {
+        self.saves += 1;
+        self.saved_shown = true;
+        let saves = self.saves;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SAVED_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.saves == saves {
+                    this.saved_shown = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn step(&mut self, delta: i32, window: &mut Window, cx: &mut Context<Self>) {
@@ -458,6 +476,7 @@ impl Inspector {
         if changed != entry {
             self.model
                 .update(cx, |model, cx| model.save_entry(changed, cx));
+            self.show_saved(cx);
         }
     }
 
@@ -579,7 +598,7 @@ impl Inspector {
             .py_1()
             .child(
                 div()
-                    .w(px(96.))
+                    .w(px(72.))
                     .flex_none()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
@@ -588,26 +607,79 @@ impl Inspector {
             .child(div().flex_1().min_w_0().child(control))
     }
 
+    /// The five statuses as icon buttons, so every choice is in sight. The
+    /// chosen one also carries its name; the rest say it on hover.
+    fn status_buttons(&self, current: Option<ListStatus>, cx: &mut Context<Self>) -> ButtonGroup {
+        ButtonGroup::new("status")
+            .outline()
+            .small()
+            .children(ListStatus::SHOWN.iter().map(|&status| {
+                let chosen = current == Some(status);
+                Button::new(format::status_label(status))
+                    .icon(Icon::new(icons::status_icon(status)))
+                    .when(chosen, |b| b.label(format::status_label(status)))
+                    .when(!chosen, |b| b.tooltip(format::status_label(status)))
+                    .selected(chosen)
+            }))
+            .on_click(cx.listener(|this, clicked: &Vec<usize>, window, cx| {
+                if let Some(&status) = clicked.first().and_then(|&ix| ListStatus::SHOWN.get(ix)) {
+                    this.set_status(status, window, cx);
+                }
+            }))
+    }
+
+    fn score_control(&self, score: u8, cx: &mut Context<Self>) -> AnyElement {
+        let format = format::score_format(self.model.read(cx).state());
+        let Some(steps) = star_scores(format) else {
+            return div()
+                .w_32()
+                .child(Select::new(&self.score).small())
+                .into_any_element();
+        };
+        // A stored score between two steps lights the stars up to the
+        // lower one, as AniList shows it.
+        let lit = steps.iter().filter(|&&v| v <= score).count();
+        let max = steps.len();
+        // Empty stars already say "no score".
+        let label = if score == 0 {
+            String::new()
+        } else {
+            format!("{lit}/{max}")
+        };
+        h_flex()
+            .gap_2()
+            .child(
+                Rating::new("score")
+                    .xsmall()
+                    .max(max)
+                    .value(lit)
+                    .on_click(cx.listener(move |this, &stars: &usize, window, cx| {
+                        // Rating reports one less than the star clicked when
+                        // that star was already lit; recover the star, then
+                        // treat a click on the top lit star as clearing and
+                        // any other as "this many".
+                        let clicked = if stars < lit { stars + 1 } else { stars };
+                        let stars = if clicked == lit { 0 } else { clicked };
+                        let value = stars.checked_sub(1).map_or(0, |ix| steps[ix]);
+                        this.save(window, cx, |e| e.score = value);
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(label),
+            )
+            .into_any_element()
+    }
+
     fn render_list(&self, id: AnimeId, cx: &mut Context<Self>) -> AnyElement {
         let Some(entry) = self.entry(cx) else {
             return v_flex()
                 .gap_2()
                 .p_4()
-                .child(div().text_sm().child("Not in your list."))
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().w_40().child(Select::new(&self.status).small()))
-                        .child(
-                            Button::new("add")
-                                .primary()
-                                .small()
-                                .label("Add to list")
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.add_to_list(window, cx)),
-                                ),
-                        ),
-                )
+                .child(widgets::section_label("Add to your list", cx))
+                .child(self.status_buttons(None, cx))
                 .into_any_element();
         };
         let total = self
@@ -616,61 +688,94 @@ impl Inspector {
             .state()
             .anime
             .get(&id)
-            .and_then(|a| a.episode_count)
-            .map_or("?".to_owned(), |n| n.to_string());
-        let stepper = h_flex()
+            .and_then(|a| a.episode_count);
+        let muted = cx.theme().muted_foreground;
+        let stepper =
+            v_flex()
+                .gap_1p5()
+                .child(
+                    h_flex()
+                        .gap_1()
+                        .child(
+                            Button::new("minus").small().icon(IconName::Minus).on_click(
+                                cx.listener(|this, _, window, cx| this.step(-1, window, cx)),
+                            ),
+                        )
+                        .child(div().w(px(56.)).child(Input::new(&self.watched).small()))
+                        .child(div().text_sm().text_color(muted).child(format!(
+                            "/ {}",
+                            total.map_or("?".to_owned(), |n| n.to_string())
+                        )))
+                        .child(
+                            Button::new("plus").small().icon(IconName::Plus).on_click(
+                                cx.listener(|this, _, window, cx| this.step(1, window, cx)),
+                            ),
+                        ),
+                )
+                .children(total.filter(|&n| n > 0).map(|n| {
+                    div().w(px(176.)).child(widgets::progress_bar(
+                        entry.watched_episodes as f32 / n as f32,
+                        cx,
+                    ))
+                }));
+        let dates = h_flex()
             .gap_1()
             .child(
-                Button::new("minus")
-                    .small()
-                    .label("−")
-                    .on_click(cx.listener(|this, _, window, cx| this.step(-1, window, cx))),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.started).small()),
             )
-            .child(div().w(px(56.)).child(Input::new(&self.watched).small()))
-            .child(div().text_sm().child(format!("/ {total}")))
+            .child(Icon::new(AppIcon::ArrowRight).xsmall().text_color(muted))
             .child(
-                Button::new("plus")
-                    .small()
-                    .label("+")
-                    .on_click(cx.listener(|this, _, window, cx| this.step(1, window, cx))),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.completed).small()),
             );
-        let rewatching = h_flex()
-            .gap_2()
+        let rewatch = h_flex()
+            .gap_3()
             .child(
-                Checkbox::new("rewatching")
+                Switch::new("rewatching")
                     .checked(entry.rewatching)
+                    .label("Now")
+                    .tooltip("Rewatching it now")
                     .on_click(cx.listener(|this, checked: &bool, window, cx| {
                         let checked = *checked;
                         this.save(window, cx, |e| e.rewatching = checked);
                     })),
             )
-            .child(div().w(px(56.)).child(Input::new(&self.rewatched).small()))
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("times before"),
+                h_flex()
+                    .gap_1()
+                    .child(div().w(px(44.)).child(Input::new(&self.rewatched).small()))
+                    .child(div().text_xs().text_color(muted).child("before")),
             );
+        let next = entry.watched_episodes + 1;
+        let play_label = match total {
+            Some(n) if next > n => "Play".to_owned(),
+            _ => format!("Play ep {next}"),
+        };
+        let saved = self.saved_shown.then(|| {
+            h_flex()
+                .gap_1()
+                .text_xs()
+                .text_color(cx.theme().success)
+                .child(Icon::new(IconName::Check).xsmall())
+                .child("Saved")
+        });
         v_flex()
             .py_2()
-            .child(Self::row("Status", Select::new(&self.status).small(), cx))
+            .child(
+                div()
+                    .px_4()
+                    .py_1()
+                    .child(self.status_buttons(Some(entry.status), cx)),
+            )
             .child(Self::row("Episodes", stepper, cx))
-            .child(Self::row(
-                "Score",
-                div().w_32().child(Select::new(&self.score).small()),
-                cx,
-            ))
-            .child(Self::row(
-                "Started",
-                div().w_32().child(Input::new(&self.started).small()),
-                cx,
-            ))
-            .child(Self::row(
-                "Completed",
-                div().w_32().child(Input::new(&self.completed).small()),
-                cx,
-            ))
-            .child(Self::row("Rewatching", rewatching, cx))
+            .child(Self::row("Score", self.score_control(entry.score, cx), cx))
+            .child(Self::row("Dates", dates, cx))
+            .child(Self::row("Rewatching", rewatch, cx))
             .child(Self::row(
                 "Notes",
                 div().h(px(64.)).child(Textarea::new(&self.notes)),
@@ -681,35 +786,30 @@ impl Inspector {
                     .gap_2()
                     .px_4()
                     .pt_3()
-                    .child(
-                        Button::new("anilist")
-                            .small()
-                            .label("Open on AniList")
-                            .on_click(move |_, _, cx| {
-                                cx.open_url(&format!("https://anilist.co/anime/{id}"))
-                            }),
-                    )
                     .child({
                         let model = self.model.clone();
                         Button::new("play-next")
                             .small()
-                            .label("Play next")
+                            .primary()
+                            .icon(IconName::Play)
+                            .label(play_label)
                             .on_click(move |_, _, cx| {
                                 model.update(cx, |model, cx| model.play(id, PlayChoice::Next, cx))
                             })
-                    }),
-            )
-            .child(
-                div()
-                    .px_4()
-                    .pt_2()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if self.model.read(cx).state().is_local() {
-                        "Changes save as you make them."
-                    } else {
-                        "Changes save as you make them and sync in the background."
-                    }),
+                    })
+                    .child(
+                        Button::new("anilist")
+                            .small()
+                            .ghost()
+                            .icon(IconName::ExternalLink)
+                            .label("AniList")
+                            .tooltip("Open on AniList")
+                            .on_click(move |_, _, cx| {
+                                cx.open_url(&format!("https://anilist.co/anime/{id}"))
+                            }),
+                    )
+                    .child(div().flex_1())
+                    .children(saved),
             )
             .into_any_element()
     }
@@ -719,6 +819,8 @@ impl Inspector {
         let Some(anime) = state.anime.get(&id) else {
             return div().into_any_element();
         };
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
         let titles = &anime.titles;
         let shown = state.title(id);
         let alternatives: Vec<&str> = [
@@ -730,69 +832,186 @@ impl Inspector {
         .chain(titles.synonyms.iter().map(String::as_str))
         .filter(|t| !t.is_empty() && *t != shown)
         .collect();
+
+        // The numbers people compare between anime go in tiles, so they
+        // are read at a glance instead of down a label column.
+        let episodes = anime
+            .episode_count
+            .map_or("?".to_owned(), |n| n.to_string());
+        let length = anime
+            .episode_length
+            .map_or("?".to_owned(), |m| format!("{m} min"));
         let average = if anime.score > 0.0 {
-            format!("{:.2}", anime.score)
+            h_flex()
+                .gap_1()
+                .child(
+                    Icon::new(IconName::StarFill)
+                        .small()
+                        .text_color(theme.yellow),
+                )
+                .child(format!("{:.1}", anime.score))
+                .into_any_element()
         } else {
-            String::new()
+            div().text_color(muted).child("–").into_any_element()
         };
-        let rows = [
-            ("Alternative titles", alternatives.join(", ")),
-            ("Type", format::type_label(anime.kind).to_owned()),
-            (
-                "Episodes",
-                anime
-                    .episode_count
-                    .map_or("Unknown".to_owned(), |n| n.to_string()),
-            ),
-            (
-                "Duration",
-                anime
-                    .episode_length
-                    .map_or(String::new(), |m| format!("{m} min")),
-            ),
-            (
-                "Status",
-                format::airing_label(anime, format::today_in_japan()).to_owned(),
-            ),
-            ("Season", format::season_label(anime.date_started)),
-            ("Score", average),
-            ("Genres", anime.genres.join(", ")),
-            (
-                "Tags",
-                anime
-                    .tags
-                    .iter()
-                    .take(12)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-            ("Studios", anime.studios.join(", ")),
-            ("Producers", anime.producers.join(", ")),
-        ];
-        let muted = cx.theme().muted_foreground;
+        let stats = h_flex()
+            .gap_2()
+            .child(widgets::stat_tile(episodes, "episodes", cx))
+            .child(widgets::stat_tile(length, "each", cx))
+            .child(widgets::stat_tile(average, "average", cx));
+
+        let today = format::today_in_japan();
+        let airing = format::airing_label(anime, today);
+        let dot = match shiori_core::anime::airing_status(anime, today) {
+            shiori_core::AiringStatus::Airing => theme.success,
+            shiori_core::AiringStatus::NotYetAired => style::accent(cx),
+            _ => muted,
+        };
+        let status = (!airing.is_empty()).then(|| {
+            h_flex()
+                .gap_2()
+                .text_sm()
+                .child(div().size_2().rounded_full().bg(dot))
+                .child(airing)
+        });
+
+        let tag_limit = if self.tags_open { usize::MAX } else { 6 };
+        let hidden_tags = anime.tags.len().saturating_sub(tag_limit);
+        let tags = (!anime.tags.is_empty()).then(|| {
+            v_flex()
+                .gap_1p5()
+                .child(widgets::section_label("Tags", cx))
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1p5()
+                        .children(
+                            anime
+                                .tags
+                                .iter()
+                                .take(tag_limit)
+                                .map(|t| widgets::chip(t.clone(), false, cx)),
+                        )
+                        .when(hidden_tags > 0, |row| {
+                            row.child(
+                                widgets::chip(format!("+{hidden_tags}"), false, cx)
+                                    .id("more-tags")
+                                    .cursor_pointer()
+                                    .text_color(muted)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.tags_open = true;
+                                        cx.notify();
+                                    })),
+                            )
+                        }),
+                )
+        });
+        let genres = (!anime.genres.is_empty()).then(|| {
+            v_flex()
+                .gap_1p5()
+                .child(widgets::section_label("Genres", cx))
+                .child(
+                    h_flex().flex_wrap().gap_1p5().children(
+                        anime
+                            .genres
+                            .iter()
+                            .map(|g| widgets::chip(g.clone(), true, cx)),
+                    ),
+                )
+        });
+
+        let synopsis = format::plain_text(&anime.synopsis);
+        // A few lines are enough to tell what it is about; the rest is
+        // there for whoever wants it.
+        let short = format::opening(&synopsis, SYNOPSIS_FOLDED);
+        let long = short.len() < synopsis.trim().len();
+        let synopsis = if long && !self.synopsis_open {
+            short
+        } else {
+            synopsis
+        };
+        let synopsis = (!synopsis.trim().is_empty()).then(|| {
+            v_flex()
+                .gap_1()
+                .child(widgets::section_label("Synopsis", cx))
+                .child(div().text_sm().child(synopsis))
+                .when(long, |section| {
+                    section.child(
+                        div()
+                            .id("synopsis-more")
+                            .text_xs()
+                            .cursor_pointer()
+                            .text_color(style::accent(cx))
+                            .child(if self.synopsis_open {
+                                "Show less"
+                            } else {
+                                "Show more"
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.synopsis_open = !this.synopsis_open;
+                                cx.notify();
+                            })),
+                    )
+                })
+        });
+
+        let made_by = anime.studios.first().map(|studio| {
+            let others: Vec<&String> = anime
+                .studios
+                .iter()
+                .skip(1)
+                .chain(
+                    anime
+                        .producers
+                        .iter()
+                        .filter(|p| !anime.studios.contains(p)),
+                )
+                .collect();
+            let others = match others.len() {
+                0 => String::new(),
+                1 | 2 => format!(
+                    "with {}",
+                    others
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                n => format!("with {}, {} +{}", others[0], others[1], n - 2),
+            };
+            v_flex()
+                .gap_1()
+                .child(widgets::section_label("Made by", cx))
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .flex_wrap()
+                        .text_sm()
+                        .child(div().font_semibold().child(studio.clone()))
+                        .child(div().text_xs().text_color(muted).child(others)),
+                )
+        });
+        let also_known = (!alternatives.is_empty()).then(|| {
+            v_flex()
+                .gap_1()
+                .child(widgets::section_label("Also known as", cx))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(alternatives.join(" · ")),
+                )
+        });
+
         v_flex()
-            .py_2()
-            .children(
-                rows.into_iter()
-                    .filter(|(_, v)| !v.is_empty())
-                    .map(|(label, value)| Self::row(label, div().text_sm().child(value), cx)),
-            )
-            .child(
-                div()
-                    .px_4()
-                    .pt_3()
-                    .text_xs()
-                    .text_color(muted)
-                    .child("Synopsis"),
-            )
-            .child(
-                div()
-                    .px_4()
-                    .py_1()
-                    .text_sm()
-                    .child(format::plain_text(&anime.synopsis)),
-            )
+            .gap_4()
+            .p_4()
+            .child(v_flex().gap_2().child(stats).children(status))
+            .children(genres)
+            .children(tags)
+            .children(synopsis)
+            .children(made_by)
+            .children(also_known)
             .into_any_element()
     }
 

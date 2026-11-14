@@ -547,12 +547,24 @@ impl AnimeView {
         let length = anime
             .and_then(|a| a.episode_length)
             .map_or(String::new(), |m| format!("{m} min"));
-        let score = entry
-            .filter(|e| e.score > 0)
-            .map_or("–".to_owned(), |e| format::score_label(state, e.score));
-        let average = anime
-            .filter(|a| a.score > 0.0)
-            .map_or(String::new(), |a| format!(" · {:.1}", a.score));
+        // The user's own score when there is one, a filled star; otherwise
+        // the average, outlined and grey, so the two are never confused.
+        let rating = match entry.filter(|e| e.score > 0) {
+            Some(e) => {
+                let label = format::score_label(state, e.score);
+                // Five-star scores are written as ★★★☆☆; beside the star
+                // icon only the count reads well.
+                let label = if label.contains('★') {
+                    label.matches('★').count().to_string()
+                } else {
+                    label
+                };
+                Some((true, label))
+            }
+            None => anime
+                .filter(|a| a.score > 0.0)
+                .map(|a| (false, format!("{:.1}", a.score))),
+        };
         let badge = inspector::badge(state, id, cx);
         let bar = progress_bar(state, id, cx);
         let poster = poster::view(&self.model, id, cx);
@@ -563,6 +575,7 @@ impl AnimeView {
             theme.table_active,
         );
         let accent = style::accent(cx);
+        let star = cx.theme().yellow;
         let model = self.model.clone();
         h_flex()
             .id(("anime-row", id.0 as usize))
@@ -617,13 +630,27 @@ impl AnimeView {
                     .child(bar),
             )
             .child(
-                div()
+                h_flex()
                     .w(px(64.))
                     .flex_none()
+                    .gap_1()
+                    .justify_center()
                     .text_xs()
-                    .text_color(muted)
-                    .text_center()
-                    .child(format!("{score}{average}")),
+                    .children(rating.map(|(own, label)| {
+                        h_flex()
+                            .gap_1()
+                            .child(if own {
+                                Icon::new(IconName::StarFill).xsmall().text_color(star)
+                            } else {
+                                Icon::new(IconName::Star).xsmall().text_color(muted)
+                            })
+                            .child(
+                                div()
+                                    .when(own, |d| d.font_semibold())
+                                    .when(!own, |d| d.text_color(muted))
+                                    .child(label),
+                            )
+                    })),
             )
             .child(div().w(px(36.)).flex_none().when(in_list, |slot| {
                 slot.child(

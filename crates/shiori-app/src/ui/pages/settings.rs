@@ -1,36 +1,52 @@
 //! The settings dialog: a section list on the left, the section's controls
 //! on the right. Edits are made on a copy and applied on OK.
+//!
+//! Choices with a few options are button groups and on/off settings are
+//! switches, so the current value is seen without opening anything.
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement,
-    PathPromptOptions, Render, SharedString, Styled, Window, div, prelude::*, px,
+    PathPromptOptions, Render, SharedString, Styled, Subscription, Window, div, prelude::*, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::{Input, InputState};
-use gpui_component::radio::{Radio, RadioGroup};
-use gpui_component::select::{Select, SelectState};
+use gpui_component::button::{Button, ButtonGroup, ButtonVariants as _};
+use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::switch::Switch;
 use gpui_component::{
-    ActiveTheme as _, IndexPath, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Icon, IconName, Selectable as _, Sizable as _, StyledExt as _,
+    WindowExt as _, h_flex, v_flex,
 };
+use shiori_core::entry::is_in_list;
 use shiori_core::{AnimeId, TitleLanguage, UpdateTrigger};
 use shiori_store::{ColorScheme, ListLocation, ProxyKind, Settings, UPDATE_DELAY_RANGE};
 use shiori_sync::anilist;
 
+use crate::ui::icons::AppIcon;
 use crate::ui::model::Model;
-use crate::ui::widgets::Choice;
-use crate::ui::{actions, format, list_location, list_transfer, numbering_editor};
+use crate::ui::{actions, format, list_location, list_transfer, numbering_editor, widgets};
 
-const SECTIONS: [&str; 8] = [
+/// The sections and their icons. Browsers are switched on under Media
+/// players, next to the browsers themselves, so Streaming has no page.
+const SECTIONS: [&str; 7] = [
     "Accounts",
     "Library",
     "Application",
     "Media players",
-    "Streaming",
     "Anime list update",
     "Recognition",
     "Advanced",
 ];
+
+fn section_icon(ix: usize) -> Icon {
+    match ix {
+        0 => Icon::new(IconName::CircleUser),
+        1 => Icon::new(IconName::Folder),
+        2 => Icon::new(IconName::Palette),
+        3 => Icon::new(IconName::Play),
+        4 => Icon::new(IconName::RefreshCw),
+        5 => Icon::new(AppIcon::Link2),
+        _ => Icon::new(IconName::Network),
+    }
+}
 
 /// Opens the settings dialog.
 pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
@@ -61,84 +77,38 @@ pub fn open(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
     });
 }
 
-fn select<T: Clone + PartialEq + 'static>(
-    items: Vec<Choice<T>>,
-    value: &T,
-    window: &mut Window,
-    cx: &mut Context<SettingsView>,
-) -> Entity<SelectState<Vec<Choice<T>>>> {
-    let ix = items
-        .iter()
-        .position(|c| &c.value == value)
-        .map(IndexPath::new);
-    cx.new(|cx| SelectState::new(items, ix, window, cx))
-}
-
 pub struct SettingsView {
     model: Entity<Model>,
     section: usize,
     /// The settings as edited so far.
     draft: Settings,
     token: Entity<InputState>,
-    title_language: Entity<SelectState<Vec<Choice<TitleLanguage>>>>,
-    color_scheme: Entity<SelectState<Vec<Choice<ColorScheme>>>>,
     detection_interval: Entity<InputState>,
-    update_trigger: Entity<SelectState<Vec<Choice<UpdateTrigger>>>>,
     update_delay: Entity<InputState>,
-    proxy_kind: Entity<SelectState<Vec<Choice<ProxyKind>>>>,
+    player_filter: Entity<InputState>,
+    /// Settings have no proxy switch of their own: a proxy is used when it
+    /// has a host. The switch hides the fields until one is wanted.
+    proxy_on: bool,
     proxy_host: Entity<InputState>,
     proxy_port: Entity<InputState>,
     proxy_username: Entity<InputState>,
     proxy_password: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl SettingsView {
     fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let draft = model.read(cx).state().settings.clone();
-        let text = |value: String, window: &mut Window, cx: &mut Context<Self>| {
-            cx.new(|cx| InputState::new(window, cx).default_value(value))
+        let text = |value: String,
+                    placeholder: &'static str,
+                    window: &mut Window,
+                    cx: &mut Context<Self>| {
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(placeholder)
+                    .default_value(value)
+            })
         };
-        let title_language = select(
-            vec![
-                Choice::new("Romaji", TitleLanguage::Romaji),
-                Choice::new("English", TitleLanguage::English),
-                Choice::new("Native", TitleLanguage::Native),
-            ],
-            &draft.title_language,
-            window,
-            cx,
-        );
-        let color_scheme = select(
-            vec![
-                Choice::new("Follow the system", ColorScheme::System),
-                Choice::new("Light", ColorScheme::Light),
-                Choice::new("Dark", ColorScheme::Dark),
-            ],
-            &draft.color_scheme,
-            window,
-            cx,
-        );
-        let update_trigger = select(
-            vec![
-                Choice::new("Update after delay", UpdateTrigger::AfterDelay),
-                Choice::new(
-                    "Update when media is closed (after delay)",
-                    UpdateTrigger::OnPlayerClose,
-                ),
-            ],
-            &draft.update_trigger,
-            window,
-            cx,
-        );
-        let proxy_kind = select(
-            vec![
-                Choice::new("HTTP", ProxyKind::Http),
-                Choice::new("SOCKS5", ProxyKind::Socks5),
-            ],
-            &draft.proxy.kind,
-            window,
-            cx,
-        );
         let token = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Paste the token from AniList")
@@ -147,32 +117,42 @@ impl SettingsView {
         // The stored password is never shown; an empty box keeps it.
         let proxy_password = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Unchanged")
+                .placeholder("Password (unchanged)")
                 .masked(true)
         });
+        let player_filter = text(String::new(), "Filter players", window, cx);
+        let subscriptions =
+            vec![
+                cx.subscribe_in(&player_filter, window, |_, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                }),
+            ];
         Self {
             section: 0,
             token,
-            title_language,
-            color_scheme,
             detection_interval: text(
                 (draft.detection_interval_ms / 1000).max(1).to_string(),
+                "",
                 window,
                 cx,
             ),
-            update_trigger,
-            update_delay: text(draft.update_delay_s.to_string(), window, cx),
-            proxy_kind,
-            proxy_host: text(draft.proxy.host.clone(), window, cx),
+            update_delay: text(draft.update_delay_s.to_string(), "", window, cx),
+            player_filter,
+            proxy_on: !draft.proxy.host.is_empty(),
+            proxy_host: text(draft.proxy.host.clone(), "Host", window, cx),
             proxy_port: text(
                 draft.proxy.port.map(|p| p.to_string()).unwrap_or_default(),
+                "Port",
                 window,
                 cx,
             ),
-            proxy_username: text(draft.proxy.username.clone(), window, cx),
+            proxy_username: text(draft.proxy.username.clone(), "Username", window, cx),
             proxy_password,
             draft,
             model,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -206,28 +186,21 @@ impl SettingsView {
             return false;
         };
         settings.update_delay_s = delay;
-        let port = value(&self.proxy_port, cx);
-        settings.proxy.port = if port.is_empty() {
-            None
-        } else if let Ok(port) = port.parse() {
-            Some(port)
+        if self.proxy_on {
+            let port = value(&self.proxy_port, cx);
+            settings.proxy.port = if port.is_empty() {
+                None
+            } else if let Ok(port) = port.parse() {
+                Some(port)
+            } else {
+                window.push_notification("Enter a proxy port from 0 to 65535.", cx);
+                return false;
+            };
+            settings.proxy.host = value(&self.proxy_host, cx);
+            settings.proxy.username = value(&self.proxy_username, cx);
         } else {
-            window.push_notification("Enter a proxy port from 0 to 65535.", cx);
-            return false;
-        };
-        settings.proxy.host = value(&self.proxy_host, cx);
-        settings.proxy.username = value(&self.proxy_username, cx);
-        if let Some(&kind) = self.proxy_kind.read(cx).selected_value() {
-            settings.proxy.kind = kind;
-        }
-        if let Some(&language) = self.title_language.read(cx).selected_value() {
-            settings.title_language = language;
-        }
-        if let Some(&scheme) = self.color_scheme.read(cx).selected_value() {
-            settings.color_scheme = scheme;
-        }
-        if let Some(&trigger) = self.update_trigger.read(cx).selected_value() {
-            settings.update_trigger = trigger;
+            // Switching the proxy off is the same as clearing its host.
+            settings.proxy.host = String::new();
         }
         let password = value(&self.proxy_password, cx);
         // Without a proxy there is no password to keep.
@@ -377,7 +350,7 @@ impl SettingsView {
         .detach();
     }
 
-    fn checkbox(
+    fn switch(
         &self,
         id: &'static str,
         label: &'static str,
@@ -385,7 +358,7 @@ impl SettingsView {
         set: fn(&mut Settings, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        Checkbox::new(id)
+        Switch::new(id)
             .label(label)
             .checked(checked)
             .on_click(cx.listener(move |this, checked: &bool, _, cx| {
@@ -395,11 +368,41 @@ impl SettingsView {
             .into_any_element()
     }
 
-    /// A checkbox per known player; unchecked ones go in
-    /// `disabled_players`. Browsers are listed too: Streaming turns them all
-    /// off at once, these turn off one.
-    fn players(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let names: Vec<(String, bool)> = self
+    /// A choice among a few values as a row of buttons, the chosen one
+    /// pressed in.
+    fn segmented<T: Copy + PartialEq + 'static>(
+        &self,
+        id: &'static str,
+        options: Vec<(Option<Icon>, &'static str, T)>,
+        current: T,
+        set: fn(&mut Settings, T),
+        cx: &mut Context<Self>,
+    ) -> ButtonGroup {
+        let values: Vec<T> = options.iter().map(|o| o.2).collect();
+        ButtonGroup::new(id)
+            .outline()
+            .small()
+            .children(options.into_iter().map(|(icon, label, value)| {
+                Button::new(label)
+                    .label(label)
+                    .when_some(icon, |button, icon| button.icon(icon))
+                    .selected(value == current)
+            }))
+            .on_click(cx.listener(move |this, clicked: &Vec<usize>, _, cx| {
+                if let Some(&value) = clicked.first().and_then(|&ix| values.get(ix)) {
+                    set(&mut this.draft, value);
+                    cx.notify();
+                }
+            }))
+    }
+
+    /// A chip per known player, filled while it is detected; turned off
+    /// ones go in `disabled_players`. Browsers have a group of their own
+    /// with the switch for streaming sites, which turns them all off at
+    /// once.
+    fn players(&self, cx: &mut Context<Self>) -> AnyElement {
+        let filter = self.player_filter.read(cx).value().trim().to_lowercase();
+        let players: Vec<(String, bool)> = self
             .model
             .read(cx)
             .tracker
@@ -412,28 +415,110 @@ impl SettingsView {
                 )
             })
             .collect();
-        let boxes = names.into_iter().map(|(name, browser)| {
-            let checked = !self.draft.disabled_players.contains(&name);
+        let total = players.len();
+        let on_count = players
+            .iter()
+            .filter(|(n, _)| !self.draft.disabled_players.contains(n))
+            .count();
+        let mut apps = Vec::new();
+        let mut browsers = Vec::new();
+        for (name, browser) in players {
+            if !filter.is_empty() && !name.to_lowercase().contains(&filter) {
+                continue;
+            }
+            let on = !self.draft.disabled_players.contains(&name);
             let id = SharedString::from(format!("player-{name}"));
-            let label = if browser {
-                format!("{name} (web browser)")
-            } else {
-                name.clone()
-            };
-            Checkbox::new(id)
-                .label(label)
-                .checked(checked)
-                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+            let toggle = name.clone();
+            let chip = widgets::chip(name, on, cx)
+                .id(id)
+                .cursor_pointer()
+                .when(on, |chip| chip.child(Icon::new(IconName::Check).xsmall()))
+                .when(browser && !self.draft.streaming_enabled, |chip| {
+                    chip.opacity(0.5)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
                     let disabled = &mut this.draft.disabled_players;
-                    disabled.retain(|n| *n != name);
-                    if !*checked {
-                        disabled.push(name.clone());
+                    if disabled.contains(&toggle) {
+                        disabled.retain(|n| *n != toggle);
+                    } else {
+                        disabled.push(toggle.clone());
                         disabled.sort();
                     }
                     cx.notify();
-                }))
-        });
-        v_flex().gap_1().children(boxes)
+                }));
+            if browser {
+                browsers.push(chip);
+            } else {
+                apps.push(chip);
+            }
+        }
+        let muted = cx.theme().muted_foreground;
+        let d = &self.draft;
+        v_flex()
+            .gap_4()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(self.switch(
+                        "detection",
+                        "Detect what I'm watching",
+                        d.detection_enabled,
+                        |s, v| s.detection_enabled = v,
+                        cx,
+                    ))
+                    .child(div().flex_1())
+                    .child(div().text_sm().text_color(muted).child("every"))
+                    .child(
+                        div()
+                            .w_16()
+                            .child(Input::new(&self.detection_interval).small()),
+                    )
+                    .child(div().text_sm().text_color(muted).child("s")),
+            )
+            .child(
+                h_flex()
+                    .gap_3()
+                    .child(
+                        div().flex_1().child(
+                            Input::new(&self.player_filter)
+                                .small()
+                                .prefix(Icon::new(IconName::Search).small().text_color(muted)),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(format!("{on_count} of {total} on")),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(widgets::section_label("Players", cx))
+                    .child(h_flex().flex_wrap().gap_1p5().children(apps)),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .child(widgets::section_label("Web browsers", cx))
+                            .child(
+                                Switch::new("streaming")
+                                    .small()
+                                    .checked(d.streaming_enabled)
+                                    .tooltip("Detect streaming sites in web browsers")
+                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                        this.draft.streaming_enabled = *checked;
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(h_flex().flex_wrap().gap_1p5().children(browsers)),
+            )
+            .into_any_element()
     }
 
     /// The user's recognition corrections: titles linked to anime and
@@ -526,247 +611,492 @@ impl SettingsView {
         let numbering_rows: Vec<_> = numbering_rows.collect();
         v_flex()
             .gap_2()
-            .child(div().pt_2().font_semibold().child("Title links"))
-            .when(link_rows.is_empty(), |el| el.child(empty("None")))
+            .child(widgets::section_label("Title links", cx))
+            .when(link_rows.is_empty(), |el| {
+                el.child(empty("Nothing linked yet"))
+            })
             .children(link_rows)
-            .child(div().pt_2().font_semibold().child("Episode numbering"))
-            .when(numbering_rows.is_empty(), |el| el.child(empty("None")))
+            .child(
+                div()
+                    .pt_3()
+                    .child(widgets::section_label("Episode numbering", cx)),
+            )
+            .when(numbering_rows.is_empty(), |el| {
+                el.child(empty("Nothing remembered yet"))
+            })
             .children(numbering_rows)
+            .into_any_element()
+    }
+
+    fn accounts(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let (muted, border, success, warning) = (
+            theme.muted_foreground,
+            theme.border,
+            theme.success,
+            theme.warning,
+        );
+        let model = self.model.read(cx);
+        let state = model.state();
+        let account = &state.accounts.anilist;
+        let signed_in = state.signed_in && !account.username.is_empty();
+        let who = if account.username.is_empty() {
+            "Not signed in".to_owned()
+        } else {
+            account.username.clone()
+        };
+        // Before the user has chosen, an existing account means the list is
+        // already the account's.
+        let location = match state.settings.list {
+            Some(location) => location,
+            None if model.has_account() => ListLocation::Account,
+            None => ListLocation::Local,
+        };
+        let local = state.is_local();
+        let count = state
+            .entries
+            .values()
+            .filter(|e| is_in_list(Some(e)))
+            .count();
+        let last_backup = model.last_backup;
+        // Uploading needs the account's token, and something to upload.
+        let can_upload = model.startup.has_local_list() && model.account().token.is_some();
+        let d = &self.draft;
+
+        let location_card = |id: &'static str,
+                             icon: AppIcon,
+                             title: &'static str,
+                             hint: String,
+                             to: ListLocation,
+                             cx: &App| {
+            let chosen = location == to;
+            let handle = self.model.clone();
+            widgets::option_card(id, icon, title, hint, chosen, cx).on_click(
+                move |_, window, cx| {
+                    if !chosen {
+                        list_location::change(&handle, to, window, cx);
+                    }
+                },
+            )
+        };
+        let local_hint = if local {
+            format!("{count} anime")
+        } else {
+            "No account needed".to_owned()
+        };
+        let cards = h_flex()
+            .gap_3()
+            .child(location_card(
+                "location-local",
+                AppIcon::Laptop,
+                "On this computer",
+                local_hint,
+                ListLocation::Local,
+                cx,
+            ))
+            .child(location_card(
+                "location-account",
+                AppIcon::Cloud,
+                "AniList",
+                who.clone(),
+                ListLocation::Account,
+                cx,
+            ));
+
+        let body = v_flex().gap_5().child(
+            v_flex()
+                .gap_2()
+                .child(widgets::section_label("Your list", cx))
+                .child(cards),
+        );
+        if local {
+            let today = jiff::Zoned::now().date();
+            // A backup older than the weekly one would be is worth a look.
+            let fresh = last_backup.is_some_and(|last| {
+                last.checked_add(jiff::Span::new().days(8))
+                    .is_ok_and(|due| due > today)
+            });
+            let (icon, color) = if fresh {
+                (AppIcon::ShieldCheck, success)
+            } else {
+                (AppIcon::ShieldAlert, warning)
+            };
+            let schedule = if d.backup_weekly {
+                "Every week · the last 4 are kept"
+            } else {
+                "Weekly backups are off"
+            };
+            let backup = v_flex()
+                .gap_2()
+                .child(widgets::section_label("Backups", cx))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .p_3()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(border)
+                        .child(widgets::tinted_icon_tile(icon, color))
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_semibold()
+                                        .child(list_location::backed_up(last_backup)),
+                                )
+                                .child(div().text_xs().text_color(muted).child(schedule)),
+                        )
+                        .child(
+                            Switch::new("backup-weekly")
+                                .checked(d.backup_weekly)
+                                .tooltip("Back up every week")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.draft.backup_weekly = *checked;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("back-up")
+                                .small()
+                                .icon(AppIcon::Download)
+                                .label("Back up now...")
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.back_up(window, cx)),
+                                ),
+                        )
+                        .child(
+                            Button::new("restore")
+                                .small()
+                                .icon(AppIcon::ArchiveRestore)
+                                .label("Restore...")
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.restore(window, cx)),
+                                ),
+                        ),
+                );
+            let moves = v_flex()
+                .gap_2()
+                .child(widgets::section_label("Move your list", cx))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            widgets::action_tile(
+                                "import-xml",
+                                AppIcon::FilePlus,
+                                "Import",
+                                "MyAnimeList XML",
+                                cx,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.import_xml(window, cx)),
+                            ),
+                        )
+                        .child(
+                            widgets::action_tile(
+                                "copy-public",
+                                AppIcon::Copy,
+                                "Copy",
+                                "A public AniList list",
+                                cx,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.copy_public(window, cx)),
+                            ),
+                        )
+                        .child(
+                            widgets::action_tile(
+                                "export-xml",
+                                AppIcon::FileDown,
+                                "Export",
+                                "MyAnimeList XML",
+                                cx,
+                            )
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.export_xml(window, cx)),
+                            ),
+                        ),
+                );
+            return body.child(backup).child(moves).into_any_element();
+        }
+
+        // Syncing and signing in mean nothing for a local list.
+        let account_card = h_flex()
+            .gap_3()
+            .p_3()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .child(widgets::icon_tile(IconName::CircleUser, signed_in, cx))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().text_sm().font_semibold().child(who))
+                    .child(div().text_xs().text_color(muted).child(if signed_in {
+                        "Signed in"
+                    } else {
+                        "Authorize, then paste the token AniList shows"
+                    })),
+            )
+            .child(self.switch(
+                "sync",
+                "Sync",
+                d.sync_enabled,
+                |s, v| s.sync_enabled = v,
+                cx,
+            ));
+        let sign_in = h_flex()
+            .gap_2()
+            .child(
+                Button::new("authorize")
+                    .small()
+                    .icon(IconName::ExternalLink)
+                    .label("Authorize")
+                    .on_click(|_, _, cx| cx.open_url(&anilist::authorize_url())),
+            )
+            .child(div().flex_1().child(Input::new(&self.token).small()))
+            .child(
+                Button::new("sign-in")
+                    .small()
+                    .primary()
+                    .icon(AppIcon::LogIn)
+                    .label("Sign in")
+                    .on_click(cx.listener(|this, _, window, cx| this.sign_in(window, cx))),
+            );
+        body.child(
+            v_flex()
+                .gap_2()
+                .child(widgets::section_label("AniList account", cx))
+                .child(account_card)
+                .child(sign_in),
+        )
+        .when(can_upload, |el| {
+            el.child(
+                v_flex()
+                    .gap_2()
+                    .child(widgets::section_label("List on this computer", cx))
+                    .child(
+                        h_flex().child(
+                            widgets::action_tile(
+                                "upload",
+                                AppIcon::CloudUpload,
+                                "Upload",
+                                "Add it to your AniList list",
+                                cx,
+                            )
+                            .flex_none()
+                            .w(px(200.))
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    list_location::ask_upload(&this.model, window, cx)
+                                },
+                            )),
+                        ),
+                    ),
+            )
+        })
+        .into_any_element()
+    }
+
+    fn library(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let (muted, border) = (theme.muted_foreground, theme.border);
+        let d = &self.draft;
+        let folders = d.library_folders.iter().enumerate().map(|(ix, folder)| {
+            h_flex()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .child(Icon::new(IconName::Folder).small().text_color(muted))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .child(folder.display().to_string()),
+                )
+                .child(
+                    Button::new(("remove-folder", ix))
+                        .ghost()
+                        .small()
+                        .icon(IconName::Close)
+                        .tooltip("Remove")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.draft.library_folders.remove(ix);
+                            cx.notify();
+                        })),
+                )
+        });
+        v_flex()
+            .gap_5()
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(widgets::section_label("Anime folders", cx))
+                    .children(folders)
+                    .when(d.library_folders.is_empty(), |list| {
+                        list.child(div().text_sm().text_color(muted).child("No folders yet"))
+                    })
+                    .child(
+                        h_flex().child(
+                            Button::new("add-folder")
+                                .small()
+                                .icon(IconName::Plus)
+                                .label("Add folder...")
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.add_folder(window, cx)),
+                                ),
+                        ),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(widgets::section_label("Titles in", cx))
+                    .child(h_flex().child(self.segmented(
+                        "title-language",
+                        vec![
+                            (None, "Romaji", TitleLanguage::Romaji),
+                            (None, "English", TitleLanguage::English),
+                            (None, "Native", TitleLanguage::Native),
+                        ],
+                        d.title_language,
+                        |s, v| s.title_language = v,
+                        cx,
+                    ))),
+            )
             .into_any_element()
     }
 
     fn render_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let label = |text: &'static str| div().text_color(muted).child(text);
         let d = &self.draft;
+        let group = |label: &'static str, cx: &App| {
+            v_flex().gap_2().child(widgets::section_label(label, cx))
+        };
         match self.section {
-            0 => {
-                let model = self.model.read(cx);
-                let state = model.state();
-                let account = &state.accounts.anilist;
-                let who = if account.username.is_empty() {
-                    "Not signed in.".to_owned()
-                } else if state.signed_in {
-                    format!("Signed in as {}.", account.username)
-                } else {
-                    format!("Account: {}.", account.username)
-                };
-                // Before the user has chosen, an existing account means the
-                // list is already the account's.
-                let selected = match state.settings.list {
-                    Some(ListLocation::Local) => Some(0),
-                    Some(ListLocation::Account) => Some(1),
-                    None => model.has_account().then_some(1),
-                };
-                let local = state.is_local();
-                let last_backup = list_location::backed_up(model.last_backup);
-                // Uploading needs the account's token, and something to upload.
-                let can_upload = model.startup.has_local_list() && model.account().token.is_some();
-                let handle = self.model.clone();
-                let location = RadioGroup::vertical("list-location")
-                    .child(Radio::new("local").label("On this computer"))
-                    .child(Radio::new("account").label("In my AniList account"))
-                    .selected_index(selected)
-                    .on_click(move |ix, window, cx| {
-                        let to = if *ix == 0 {
-                            ListLocation::Local
-                        } else {
-                            ListLocation::Account
-                        };
-                        list_location::change(&handle, to, window, cx);
-                    });
-                v_flex()
-                    .gap_3()
-                    .child(label("Where your list lives"))
-                    .child(location)
-                    .when(local, |el| {
-                        el.child(label("Backup"))
-                            .child(div().child(last_backup))
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(Button::new("back-up").label("Back up now...").on_click(
-                                        cx.listener(|this, _, window, cx| this.back_up(window, cx)),
-                                    ))
-                                    .child(Button::new("restore").label("Restore...").on_click(
-                                        cx.listener(|this, _, window, cx| this.restore(window, cx)),
-                                    )),
-                            )
-                            .child(self.checkbox(
-                                "backup-weekly",
-                                "Back up every week (the last 4 are kept)",
-                                d.backup_weekly,
-                                |s, v| s.backup_weekly = v,
-                                cx,
-                            ))
-                            .child(label("Move your list"))
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .flex_wrap()
-                                    .child(
-                                        Button::new("import-xml")
-                                            .label("Import MyAnimeList XML...")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.import_xml(window, cx)
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("copy-public")
-                                            .label("Copy a public AniList list...")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.copy_public(window, cx)
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("export-xml")
-                                            .label("Export as MyAnimeList XML...")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.export_xml(window, cx)
-                                            })),
-                                    ),
-                            )
-                    })
-                    // Syncing and signing in mean nothing for a local list.
-                    .when(!local, |el| {
-                        el.child(self.checkbox(
-                            "sync",
-                            "Enable synchronization",
-                            d.sync_enabled,
-                            |s, v| s.sync_enabled = v,
+            0 => self.accounts(cx),
+            1 => self.library(cx),
+            2 => group("Color scheme", cx)
+                .child(h_flex().child(self.segmented(
+                    "color-scheme",
+                    vec![
+                        (
+                            Some(Icon::new(AppIcon::Monitor)),
+                            "System",
+                            ColorScheme::System,
+                        ),
+                        (Some(Icon::new(IconName::Sun)), "Light", ColorScheme::Light),
+                        (Some(Icon::new(IconName::Moon)), "Dark", ColorScheme::Dark),
+                    ],
+                    d.color_scheme,
+                    |s, v| s.color_scheme = v,
+                    cx,
+                )))
+                .into_any_element(),
+            3 => self.players(cx),
+            4 => v_flex()
+                .gap_5()
+                .child(
+                    group("Update my list", cx)
+                        .child(h_flex().child(self.segmented(
+                            "update-trigger",
+                            vec![
+                                (None, "After a delay", UpdateTrigger::AfterDelay),
+                                (None, "When the player closes", UpdateTrigger::OnPlayerClose),
+                            ],
+                            d.update_trigger,
+                            |s, v| s.update_trigger = v,
+                            cx,
+                        )))
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(div().text_sm().text_color(muted).child("Wait"))
+                                .child(div().w_20().child(Input::new(&self.update_delay).small()))
+                                .child(div().text_sm().text_color(muted).child("seconds first")),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .child(self.switch(
+                            "pause",
+                            "Pause the wait while the player is in the background",
+                            d.pause_when_unfocused,
+                            |s, v| s.pause_when_unfocused = v,
                             cx,
                         ))
-                        .child(label("AniList account"))
-                        .child(div().child(who))
-                        .child(div().text_sm().child(
-                            "Click Authorize, approve Shiori on AniList, then paste the token it shows here.",
-                        ))
+                        .child(self.switch(
+                            "library-only",
+                            "Only update for files in my library folders",
+                            d.library_only,
+                            |s, v| s.library_only = v,
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+            5 => self.recognition(cx),
+            _ => {
+                let fields = self.proxy_on.then(|| {
+                    v_flex()
+                        .gap_2()
+                        .child(h_flex().child(self.segmented(
+                            "proxy-kind",
+                            vec![
+                                (None, "HTTP", ProxyKind::Http),
+                                (None, "SOCKS5", ProxyKind::Socks5),
+                            ],
+                            d.proxy.kind,
+                            |s, v| s.proxy.kind = v,
+                            cx,
+                        )))
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(div().flex_1().child(Input::new(&self.proxy_host).small()))
+                                .child(div().w_24().child(Input::new(&self.proxy_port).small())),
+                        )
                         .child(
                             h_flex()
                                 .gap_2()
                                 .child(
-                                    Button::new("authorize")
-                                        .label("Authorize")
-                                        .on_click(|_, _, cx| cx.open_url(&anilist::authorize_url())),
+                                    div()
+                                        .flex_1()
+                                        .child(Input::new(&self.proxy_username).small()),
                                 )
-                                .child(div().flex_1().child(Input::new(&self.token)))
-                                .child(Button::new("sign-in").label("Sign in").on_click(
-                                    cx.listener(|this, _, window, cx| this.sign_in(window, cx)),
-                                )),
-                        )
-                        .when(can_upload, |el| {
-                            el.child(label("List on this computer")).child(
-                                h_flex().child(
-                                    Button::new("upload")
-                                        .label("Upload it to AniList...")
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            list_location::ask_upload(&this.model, window, cx)
-                                        })),
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .child(Input::new(&self.proxy_password).small()),
                                 ),
-                            )
-                        })
-                    })
-                    .into_any_element()
-            }
-            1 => {
-                let folders = d.library_folders.iter().enumerate().map(|(ix, folder)| {
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex_1()
-                                .truncate()
-                                .child(folder.display().to_string()),
-                        )
-                        .child(
-                            Button::new(("remove-folder", ix))
-                                .ghost()
-                                .label("Remove")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.draft.library_folders.remove(ix);
-                                    cx.notify();
-                                })),
                         )
                 });
-                v_flex()
-                    .gap_3()
-                    .child(label("Anime folders"))
-                    .children(folders)
-                    .when(d.library_folders.is_empty(), |list| {
-                        list.child(div().text_sm().child("No folders yet."))
-                    })
-                    .child(h_flex().child(
-                        Button::new("add-folder").label("Add folder...").on_click(
-                            cx.listener(|this, _, window, cx| this.add_folder(window, cx)),
-                        ),
-                    ))
-                    .child(label("Title language"))
-                    .child(div().w_48().child(Select::new(&self.title_language)))
+                group("Proxy", cx)
+                    .child(
+                        Switch::new("proxy")
+                            .label("Use a proxy")
+                            .checked(self.proxy_on)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.proxy_on = *checked;
+                                cx.notify();
+                            })),
+                    )
+                    .children(fields)
                     .into_any_element()
             }
-            2 => v_flex()
-                .gap_3()
-                .child(label("Color scheme"))
-                .child(div().w_48().child(Select::new(&self.color_scheme)))
-                .into_any_element(),
-            3 => v_flex()
-                .gap_3()
-                .child(self.checkbox(
-                    "detection",
-                    "Enable detection",
-                    d.detection_enabled,
-                    |s, v| s.detection_enabled = v,
-                    cx,
-                ))
-                .child(label("Detection interval in seconds"))
-                .child(div().w_24().child(Input::new(&self.detection_interval)))
-                .child(label("Media players"))
-                .child(self.players(cx))
-                .into_any_element(),
-            4 => v_flex()
-                .gap_3()
-                .child(self.checkbox(
-                    "streaming",
-                    "Detect streaming media in web browsers",
-                    d.streaming_enabled,
-                    |s, v| s.streaming_enabled = v,
-                    cx,
-                ))
-                .into_any_element(),
-            5 => v_flex()
-                .gap_3()
-                .child(div().w_96().child(Select::new(&self.update_trigger)))
-                .child(label("Delay in seconds"))
-                .child(div().w_24().child(Input::new(&self.update_delay)))
-                .child(self.checkbox(
-                    "pause",
-                    "Pause delay while player is not in focus",
-                    d.pause_when_unfocused,
-                    |s, v| s.pause_when_unfocused = v,
-                    cx,
-                ))
-                .child(self.checkbox(
-                    "library-only",
-                    "Ignore files outside of library folders",
-                    d.library_only,
-                    |s, v| s.library_only = v,
-                    cx,
-                ))
-                .into_any_element(),
-            6 => self.recognition(cx),
-            _ => v_flex()
-                .gap_3()
-                .child(label("Proxy type"))
-                .child(div().w_32().child(Select::new(&self.proxy_kind)))
-                .child(label("Host (empty for no proxy)"))
-                .child(Input::new(&self.proxy_host))
-                .child(label("Port"))
-                .child(div().w_24().child(Input::new(&self.proxy_port)))
-                .child(label("Username"))
-                .child(Input::new(&self.proxy_username))
-                .child(label("Password"))
-                .child(Input::new(&self.proxy_password))
-                .into_any_element(),
         }
     }
 }
@@ -775,15 +1105,18 @@ impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active = cx.theme().table_active;
         let hover = cx.theme().table_hover;
+        let muted = cx.theme().muted_foreground;
         let sections = SECTIONS.iter().enumerate().map(|(ix, name)| {
             let name: SharedString = (*name).into();
-            div()
+            h_flex()
                 .id(("section", ix))
+                .gap_2()
                 .px_2()
                 .py_1()
                 .rounded_md()
                 .when(ix == self.section, |item| item.bg(active))
                 .hover(|item| item.bg(hover))
+                .child(section_icon(ix).small().text_color(muted))
                 .child(name)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.section = ix;
@@ -799,6 +1132,7 @@ impl Render for SettingsView {
                 div()
                     .id("section-content")
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .overflow_y_scroll()
                     .child(self.render_section(cx)),

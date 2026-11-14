@@ -409,13 +409,6 @@ impl MainWindow {
                 .child(n.to_string())
                 .into_any_element()
         };
-        let status_icons = [
-            AppIcon::CirclePlay,
-            AppIcon::CircleCheck,
-            AppIcon::CirclePause,
-            AppIcon::CircleX,
-            AppIcon::Bookmark,
-        ];
         let status_ids = [
             "watching",
             "completed",
@@ -427,7 +420,7 @@ impl MainWindow {
         for (i, (&status, count)) in ListStatus::SHOWN.iter().zip(counts).enumerate() {
             statuses.push(item(
                 status_ids[i],
-                Icon::new(status_icons[i]),
+                Icon::new(super::icons::status_icon(status)),
                 pages::status_label(status).into(),
                 Page::AnimeList(Some(status)),
                 Some(count_label(count)),
@@ -575,10 +568,7 @@ impl MainWindow {
         } else {
             theme.muted_foreground
         };
-        let (dot, state) = if local {
-            // Nothing is synchronized, so there is no sync state to report.
-            (theme.border, "Local".to_owned())
-        } else if status.busy {
+        let (dot, state) = if status.busy {
             (theme.warning, format!("Synchronizing with {service}"))
         } else if status.is_error {
             (theme.danger, "Not synchronized".to_owned())
@@ -606,8 +596,12 @@ impl MainWindow {
                         .child(status.text.clone()),
                 ),
             })
-            .child(div().size(px(7.)).rounded_full().bg(dot))
-            .child(div().text_color(theme.muted_foreground).child(state))
+            // A local list has no sync state, and the sidebar already says
+            // where the list is, so only the refresh button stays.
+            .when(!local, |bar| {
+                bar.child(div().size(px(7.)).rounded_full().bg(dot))
+                    .child(div().text_color(theme.muted_foreground).child(state))
+            })
             .child(
                 Button::new("sync")
                     .xsmall()
@@ -637,7 +631,14 @@ impl Render for MainWindow {
         };
         let width = self.model.read(cx).session.inspector_width.unwrap_or(320.);
         let model = self.model.clone();
-        let content: AnyElement = if beside && !matches!(self.page, Page::Anime(_)) {
+        // With nothing selected the inspector would only ask for a
+        // selection, so the list takes the whole width until there is one.
+        let selected = self
+            .model
+            .read(cx)
+            .selected
+            .is_some_and(|id| self.model.read(cx).state().anime.contains_key(&id));
+        let content: AnyElement = if beside && selected && !matches!(self.page, Page::Anime(_)) {
             h_resizable("main-split")
                 .with_state(&self.split)
                 .on_resize(move |state, _, cx| {

@@ -11,8 +11,9 @@ use gpui_component::table::{Column, DataTable, TableDelegate, TableEvent, TableS
 use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 use shiori_core::{AnimeId, Fields, HistoryItem, QueueItem};
 
+use crate::ui::icons::AppIcon;
 use crate::ui::model::Model;
-use crate::ui::{actions, inspector};
+use crate::ui::{actions, inspector, widgets};
 
 fn time_label(time: jiff::Timestamp) -> String {
     time.to_zoned(jiff::tz::TimeZone::system())
@@ -61,6 +62,20 @@ impl TableDelegate for HistoryDelegate {
         div()
             .truncate()
             .child(self.cell_label(row_ix, col_ix, cx).unwrap_or_default())
+    }
+
+    fn render_empty(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        widgets::empty_state(
+            AppIcon::Clock,
+            "Nothing watched yet",
+            "Episodes you watch show up here.",
+            None,
+            cx,
+        )
     }
 
     fn cell_label(&self, row_ix: usize, col_ix: usize, cx: &App) -> Option<SharedString> {
@@ -167,6 +182,20 @@ impl TableDelegate for QueueDelegate {
         div()
             .truncate()
             .child(self.cell_label(row_ix, col_ix, cx).unwrap_or_default())
+    }
+
+    fn render_empty(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        widgets::empty_state(
+            AppIcon::CircleCheck,
+            "Nothing waiting",
+            "Every change has been synchronized.",
+            None,
+            cx,
+        )
     }
 
     fn cell_label(&self, row_ix: usize, col_ix: usize, cx: &App) -> Option<SharedString> {

@@ -27,10 +27,17 @@ pub enum AppIcon {
     FilePlus,
     LogIn,
     ArrowRight,
+    ShieldCheck,
+    ShieldAlert,
+    Download,
+    FileDown,
+    Monitor,
+    ArchiveRestore,
+    Link2,
 }
 
 impl AppIcon {
-    const FILES: [(&'static str, &'static [u8]); 17] = [
+    const FILES: [(&'static str, &'static [u8]); 24] = [
         (
             "app-icons/house.svg",
             include_bytes!("../../../../assets/icons/house.svg"),
@@ -99,6 +106,34 @@ impl AppIcon {
             "app-icons/arrow-right.svg",
             include_bytes!("../../../../assets/icons/arrow-right.svg"),
         ),
+        (
+            "app-icons/shield-check.svg",
+            include_bytes!("../../../../assets/icons/shield-check.svg"),
+        ),
+        (
+            "app-icons/shield-alert.svg",
+            include_bytes!("../../../../assets/icons/shield-alert.svg"),
+        ),
+        (
+            "app-icons/download.svg",
+            include_bytes!("../../../../assets/icons/download.svg"),
+        ),
+        (
+            "app-icons/file-down.svg",
+            include_bytes!("../../../../assets/icons/file-down.svg"),
+        ),
+        (
+            "app-icons/monitor.svg",
+            include_bytes!("../../../../assets/icons/monitor.svg"),
+        ),
+        (
+            "app-icons/archive-restore.svg",
+            include_bytes!("../../../../assets/icons/archive-restore.svg"),
+        ),
+        (
+            "app-icons/link-2.svg",
+            include_bytes!("../../../../assets/icons/link-2.svg"),
+        ),
     ];
 }
 
@@ -106,6 +141,18 @@ impl IconNamed for AppIcon {
     fn path(self) -> SharedString {
         let index = self as usize;
         Self::FILES[index].0.into()
+    }
+}
+
+/// The icon of a list status, the same in the sidebar and the inspector.
+pub fn status_icon(status: shiori_core::ListStatus) -> AppIcon {
+    use shiori_core::ListStatus;
+    match status {
+        ListStatus::Watching => AppIcon::CirclePlay,
+        ListStatus::Completed => AppIcon::CircleCheck,
+        ListStatus::OnHold => AppIcon::CirclePause,
+        ListStatus::Dropped => AppIcon::CircleX,
+        ListStatus::PlanToWatch | ListStatus::NotInList => AppIcon::Bookmark,
     }
 }
 
