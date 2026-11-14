@@ -20,6 +20,8 @@ mod tracker;
 mod tray;
 mod widgets;
 
+use std::time::Duration;
+
 use anyhow::Result;
 use gpui::{
     App, AppContext as _, Bounds, Entity, KeyBinding, Pixels, QuitMode, Size, Window, WindowBounds,
@@ -30,6 +32,7 @@ use shiori_store::{ColorScheme, WindowGeometry};
 
 use shiori_app::single_instance::Request;
 use shiori_app::startup::Context as Startup;
+use shiori_app::state::AppEvent;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracker::{Badge, TrackingEvent};
 use tray::TrayCommand;
@@ -118,9 +121,18 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
         // With a tray icon, closing the main window leaves the app running;
         // without one there would be no way back, so it quits as usual.
         let detection = model.read(cx).state().settings.detection_enabled;
+        let local = model.read(cx).state().is_local();
         tracing::debug!("Starting the tray icon");
-        if let Some((tray, mut commands)) = tray::start(detection) {
+        if let Some((tray, mut commands)) = tray::start(detection, local) {
             cx.set_global(TrayGlobal(tray));
+            cx.subscribe(&model, |model, event: &AppEvent, cx| {
+                if *event == AppEvent::ListReplaced
+                    && let Some(tray) = cx.try_global::<TrayGlobal>()
+                {
+                    tray.0.set_local(model.read(cx).state().is_local());
+                }
+            })
+            .detach();
             cx.set_quit_mode(QuitMode::Explicit);
             let model = model.clone();
             cx.spawn(async move |cx| {
@@ -143,6 +155,7 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
         }
 
         start_tracking(&model, cx);
+        start_refreshing(&model, cx);
 
         tracing::debug!("Opening the main window");
         let Some(main_window) = show_main_window(&model, cx) else {
@@ -283,6 +296,28 @@ pub fn geometry_of(window: &Window) -> WindowGeometry {
 
 /// Starts detection, and shows its state in the tray and asks for
 /// confirmations with a desktop notification.
+/// A local list's anime are refreshed on start and then every hour; only
+/// stale ones are fetched, so most rounds ask about a few airing anime.
+fn start_refreshing(model: &Entity<Model>, cx: &mut App) {
+    let model = model.downgrade();
+    cx.spawn(async move |cx| {
+        loop {
+            let alive = model.update(cx, |model, cx| {
+                if model.state().is_local() {
+                    model.refresh_anime_data(false, cx);
+                }
+            });
+            if alive.is_err() {
+                break;
+            }
+            cx.background_executor()
+                .timer(Duration::from_secs(60 * 60))
+                .await;
+        }
+    })
+    .detach();
+}
+
 fn start_tracking(model: &Entity<Model>, cx: &mut App) {
     cx.subscribe(model, |_, event: &TrackingEvent, cx| {
         let TrackingEvent::Badge(badge) = *event;

@@ -44,6 +44,8 @@ pub struct Model {
     pub status: Status,
     /// Synchronize is running; a second click waits for it.
     pub(super) syncing: bool,
+    /// Anime data is being refreshed for a local list; a second start waits.
+    pub(super) refreshing: bool,
     pub posters: Posters,
     pub session: Session,
     /// A session write is scheduled.
@@ -96,6 +98,7 @@ impl Model {
             http,
             status: Status::default(),
             syncing: false,
+            refreshing: false,
             posters: Posters::default(),
             session,
             session_save: None,
@@ -555,8 +558,13 @@ impl Model {
     // ---- Synchronize --------------------------------------------------------
 
     pub fn synchronize(&mut self, cx: &mut Context<Self>) {
-        // A local list has no service to synchronize with.
-        if self.syncing || self.state().is_local() {
+        // A local list has no service to synchronize with; what it can
+        // still get from the service is fresh anime data.
+        if self.state().is_local() {
+            self.refresh_anime_data(true, cx);
+            return;
+        }
+        if self.syncing {
             return;
         }
         self.syncing = true;

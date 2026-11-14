@@ -6,10 +6,15 @@ use std::rc::Rc;
 use gpui::{App, Context, Entity, ParentElement as _, Styled as _, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{WindowExt as _, h_flex};
+use jiff::Timestamp;
+use shiori_app::refresh::anime_to_refresh;
 use shiori_app::state::AppEvent;
+use shiori_core::AnimeId;
 use shiori_core::entry::is_in_list;
 use shiori_store::ListLocation;
+use shiori_sync::anilist::AniList;
 
+use super::format;
 use super::model::Model;
 use super::pages;
 
@@ -42,7 +47,10 @@ impl Model {
         self.emit(vec![AppEvent::ListReplaced, AppEvent::SettingsChanged], cx);
         let service = self.service_name();
         match to {
-            ListLocation::Local => self.set_status("Your list is now kept on this computer.", cx),
+            ListLocation::Local => {
+                self.set_status("Your list is now kept on this computer.", cx);
+                self.refresh_anime_data(false, cx);
+            }
             ListLocation::Account => {
                 self.set_status(format!("Using your {service} list."), cx);
                 if self.state().settings.sync_enabled {
@@ -50,6 +58,74 @@ impl Model {
                 }
             }
         }
+    }
+}
+
+impl Model {
+    /// Fetches the list's followed anime again, 50 to a request. `asked`
+    /// is the user's "Refresh anime data": every followed anime is fetched
+    /// and the outcome is shown. Otherwise only stale ones are, quietly,
+    /// since a missing connection is no news to the user.
+    pub fn refresh_anime_data(&mut self, asked: bool, cx: &mut Context<Self>) {
+        if self.refreshing {
+            return;
+        }
+        let ids = anime_to_refresh(
+            self.state(),
+            Timestamp::now(),
+            format::today_in_japan(),
+            asked,
+        );
+        if ids.is_empty() {
+            if asked {
+                self.set_status("Anime data is up to date.", cx);
+            }
+            return;
+        }
+        if asked {
+            self.set_status(format!("Refreshing {} anime...", ids.len()), cx);
+        }
+        self.refreshing = true;
+        self.refresh_batch(ids, 0, asked, cx);
+    }
+
+    /// One request at a time, so a large list stays within AniList's rate
+    /// limit.
+    fn refresh_batch(
+        &mut self,
+        mut ids: Vec<AnimeId>,
+        done: usize,
+        asked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let rest = ids.split_off(ids.len().min(AniList::IDS_PER_REQUEST));
+        let service = self.service().clone();
+        self.request(
+            async move { service.fetch_anime_by_ids(&ids).await },
+            cx,
+            move |this, result, cx| match result {
+                Ok(anime) => {
+                    let done = done + anime.len();
+                    let result = this.startup.state.store_anime(anime);
+                    this.apply(result, cx);
+                    if rest.is_empty() {
+                        this.refreshing = false;
+                        if asked {
+                            this.set_status(format!("Refreshed {done} anime."), cx);
+                        }
+                    } else {
+                        this.refresh_batch(rest, done, asked, cx);
+                    }
+                }
+                Err(error) => {
+                    this.refreshing = false;
+                    tracing::warn!("Could not refresh anime data: {error}");
+                    if asked {
+                        this.set_error(format!("Could not refresh anime data: {error}"), cx);
+                    }
+                }
+            },
+        );
     }
 }
 

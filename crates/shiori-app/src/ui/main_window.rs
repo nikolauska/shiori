@@ -245,17 +245,19 @@ impl MainWindow {
         let m3 = model.clone();
         let v1 = view.clone();
         let v2 = view.clone();
-        // A local list has nothing to synchronize with.
-        let menu = if local {
-            menu
+        // A local list has nothing to synchronize with; Synchronize
+        // refreshes its anime data instead.
+        let first = if local {
+            "Refresh anime data".to_owned()
         } else {
-            menu.item(
-                PopupMenuItem::new(format!("Synchronize with {service}"))
+            format!("Synchronize with {service}")
+        };
+        let menu = menu
+            .item(
+                PopupMenuItem::new(first)
                     .on_click(move |_, _, cx| m.update(cx, |model, cx| model.synchronize(cx))),
             )
             .separator()
-        };
-        let menu = menu
             .item(PopupMenuItem::new("Play next episode").on_click({
                 let m = model.clone();
                 move |_, _, cx| m.update(cx, |model, cx| model.play_selected_next(cx))
@@ -580,19 +582,21 @@ impl MainWindow {
             })
             .child(div().size(px(7.)).rounded_full().bg(dot))
             .child(div().text_color(theme.muted_foreground).child(state))
-            .when(!local, |bar| {
-                bar.child(
-                    Button::new("sync")
-                        .xsmall()
-                        .ghost()
-                        .icon(IconName::RefreshCw)
-                        .tooltip(format!("Synchronize with {service} (Ctrl+S)"))
-                        .loading(status.busy)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.synchronize(&Synchronize, window, cx)
-                        })),
-                )
-            })
+            .child(
+                Button::new("sync")
+                    .xsmall()
+                    .ghost()
+                    .icon(IconName::RefreshCw)
+                    .tooltip(if local {
+                        "Refresh anime data (Ctrl+S)".to_owned()
+                    } else {
+                        format!("Synchronize with {service} (Ctrl+S)")
+                    })
+                    .loading(status.busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.synchronize(&Synchronize, window, cx)
+                    })),
+            )
     }
 }
 

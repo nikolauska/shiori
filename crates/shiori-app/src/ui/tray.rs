@@ -24,6 +24,23 @@ const DETECTION: &str = "detection";
 const SETTINGS: &str = "settings";
 const EXIT: &str = "exit";
 
+/// A local list has nothing to synchronize; the same item refreshes its
+/// anime data.
+fn sync_label(local: bool) -> &'static str {
+    if local {
+        "Refresh anime data"
+    } else {
+        "Synchronize"
+    }
+}
+
+/// A change for the icon's thread.
+#[cfg(target_os = "linux")]
+enum Update {
+    Badge(Option<u32>),
+    Local(bool),
+}
+
 /// The app icon with an optional badge color, or a plain square in the
 /// icon's violet if it cannot be decoded, so the tray never ends up without
 /// an icon.
@@ -37,11 +54,12 @@ fn icon(badge: Option<u32>) -> Icon {
     Icon::from_rgba(rgba, 16, 16).expect("a 16 by 16 RGBA square")
 }
 
-fn build(detection_enabled: bool) -> Result<TrayIcon, String> {
+fn build(detection_enabled: bool, local: bool) -> Result<(TrayIcon, MenuItem), String> {
     let menu = Menu::new();
+    let sync = MenuItem::with_id(SYNCHRONIZE, sync_label(local), true, None);
     menu.append_items(&[
         &MenuItem::with_id(SHOW, "Open Shiori", true, None),
-        &MenuItem::with_id(SYNCHRONIZE, "Synchronize", true, None),
+        &sync,
         &CheckMenuItem::with_id(DETECTION, "Enable detection", true, detection_enabled, None),
         &MenuItem::with_id(SETTINGS, "Settings", true, None),
         &PredefinedMenuItem::separator(),
@@ -55,6 +73,7 @@ fn build(detection_enabled: bool) -> Result<TrayIcon, String> {
         // A left click opens the window; the menu is on the right button.
         .with_menu_on_left_click(false)
         .build()
+        .map(|icon| (icon, sync))
         .map_err(|e| e.to_string())
 }
 
@@ -87,29 +106,42 @@ fn forward_events(sender: UnboundedSender<TrayCommand>) {
 pub struct Tray {
     #[cfg(not(target_os = "linux"))]
     icon: TrayIcon,
-    /// The icon lives on the GTK thread; badges are sent there.
+    #[cfg(not(target_os = "linux"))]
+    sync: MenuItem,
+    /// The icon lives on the GTK thread; changes are sent there.
     #[cfg(target_os = "linux")]
-    badges: std::sync::mpsc::Sender<Option<u32>>,
+    updates: std::sync::mpsc::Sender<Update>,
 }
 
 impl Tray {
     /// Shows a dot of this color on the icon, or none.
     pub fn set_badge(&self, badge: Option<u32>) {
         #[cfg(target_os = "linux")]
-        let _ = self.badges.send(badge);
+        let _ = self.updates.send(Update::Badge(badge));
         #[cfg(not(target_os = "linux"))]
         if let Err(error) = self.icon.set_icon(Some(icon(badge))) {
             tracing::warn!("Could not change the tray icon: {error}");
         }
     }
+
+    /// Names the sync item for where the list lives.
+    pub fn set_local(&self, local: bool) {
+        #[cfg(target_os = "linux")]
+        let _ = self.updates.send(Update::Local(local));
+        #[cfg(not(target_os = "linux"))]
+        self.sync.set_text(sync_label(local));
+    }
 }
 
 /// Shows the tray icon. `None` when the system has no tray, in which case
 /// closing the main window must quit the app.
-pub fn start(detection_enabled: bool) -> Option<(Tray, UnboundedReceiver<TrayCommand>)> {
+pub fn start(
+    detection_enabled: bool,
+    local: bool,
+) -> Option<(Tray, UnboundedReceiver<TrayCommand>)> {
     let (sender, receiver) = unbounded_channel();
     forward_events(sender);
-    match start_icon(detection_enabled) {
+    match start_icon(detection_enabled, local) {
         Ok(tray) => Some((tray, receiver)),
         Err(error) => {
             tracing::warn!("No tray icon: {error}");
@@ -119,9 +151,9 @@ pub fn start(detection_enabled: bool) -> Option<(Tray, UnboundedReceiver<TrayCom
 }
 
 #[cfg(target_os = "linux")]
-fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
+fn start_icon(detection_enabled: bool, local: bool) -> Result<Tray, String> {
     let (ready, started) = std::sync::mpsc::sync_channel(1);
-    let (badges, receive_badges) = std::sync::mpsc::channel::<Option<u32>>();
+    let (updates, receive_updates) = std::sync::mpsc::channel::<Update>();
     std::thread::Builder::new()
         .name("shiori-tray".into())
         .spawn(move || {
@@ -129,18 +161,25 @@ fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
                 let _ = ready.send(Err(error.to_string()));
                 return;
             }
-            match build(detection_enabled) {
-                Ok(tray) => {
+            match build(detection_enabled, local) {
+                Ok((tray, sync)) => {
                     let _ = ready.send(Ok(()));
-                    // The icon is not Send, so badges are picked up here.
+                    // The icon is not Send, so changes are picked up here.
                     // A quarter second is quick enough for a status dot.
                     gtk::glib::timeout_add_local(std::time::Duration::from_millis(250), {
                         let tray = tray.clone();
                         move || {
-                            if let Some(badge) = receive_badges.try_iter().last()
-                                && let Err(error) = tray.set_icon(Some(icon(badge)))
-                            {
-                                tracing::warn!("Could not change the tray icon: {error}");
+                            for update in receive_updates.try_iter() {
+                                match update {
+                                    Update::Badge(badge) => {
+                                        if let Err(error) = tray.set_icon(Some(icon(badge))) {
+                                            tracing::warn!(
+                                                "Could not change the tray icon: {error}"
+                                            );
+                                        }
+                                    }
+                                    Update::Local(local) => sync.set_text(sync_label(local)),
+                                }
                             }
                             gtk::glib::ControlFlow::Continue
                         }
@@ -158,12 +197,12 @@ fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
     started
         .recv()
         .map_err(|e| e.to_string())?
-        .map(|()| Tray { badges })
+        .map(|()| Tray { updates })
 }
 
 #[cfg(not(target_os = "linux"))]
-fn start_icon(detection_enabled: bool) -> Result<Tray, String> {
-    build(detection_enabled).map(|icon| Tray { icon })
+fn start_icon(detection_enabled: bool, local: bool) -> Result<Tray, String> {
+    build(detection_enabled, local).map(|(icon, sync)| Tray { icon, sync })
 }
 
 impl std::fmt::Debug for Tray {

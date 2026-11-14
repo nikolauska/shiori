@@ -128,6 +128,35 @@ impl AniList {
     }
 }
 
+impl AniList {
+    /// Most anime `fetch_anime_by_ids` takes at once; AniList pages hold 50.
+    pub const IDS_PER_REQUEST: usize = 50;
+
+    /// Several anime in one request, for keeping a local list's anime up to
+    /// date without a request per anime. Anime AniList no longer has are
+    /// simply missing from the answer.
+    pub async fn fetch_anime_by_ids(&self, ids: &[AnimeId]) -> Result<Vec<Anime>, ServiceError> {
+        debug_assert!(ids.len() <= Self::IDS_PER_REQUEST);
+        let ids: Vec<u32> = ids.iter().map(|id| id.0).collect();
+        let data: PageData = self
+            .request(
+                include_str!("queries/media_by_ids.graphql"),
+                json!({ "ids": ids }),
+                None,
+                "Could not parse anime details.",
+                None,
+            )
+            .await?;
+        let now = Timestamp::now();
+        Ok(data
+            .page
+            .media
+            .into_iter()
+            .filter_map(|m| to_anime(m, now))
+            .collect())
+    }
+}
+
 impl Service for AniList {
     fn id(&self) -> ServiceId {
         ServiceId::AniList

@@ -6,6 +6,7 @@ pub mod export;
 pub mod home;
 pub mod list_view;
 pub mod posters;
+pub mod refresh;
 pub mod single_instance;
 pub mod startup;
 pub mod state;

@@ -13,6 +13,7 @@ A list on this computer:
 - Is saved as you change it, and that's all. Nothing is queued or sent, and Shiori never mentions synchronizing.
 - Removes an anime at once when you remove it.
 - Still gets anime information (titles, episodes, airing times, posters) from AniList, the same way searching does. Those requests carry anime ids or search words, nothing about you.
+- Keeps that information fresh by itself: on start and every hour, Shiori asks AniList again about the anime you are watching or planning to watch and anything still airing, up to 50 at a time. An airing anime is asked about at most once an hour, a finished one at most once a week. "Refresh anime data" (where "Synchronize" is with an account) asks about all of them right away.
 
 It is kept apart from your AniList list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens your AniList list as you left it, and the list on this computer stays, so you can switch back.
 
