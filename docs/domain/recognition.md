@@ -54,7 +54,7 @@ The same list handles specials that are numbered as episode 0 or placed between 
 
 **To fix it for good**, open the anime's settings and add the title from your file names as an alternative title. Your alternative titles always take priority.
 
-**The wrong anime is recognized.** This usually happens when two anime share a title. Adding the title as an alternative title to the right one settles it.
+**The wrong anime is recognized.** The anime's "Now playing" tab says which title Shiori read and what it matched. This usually happens when two anime share a title. Adding the title as an alternative title to the right one settles it.
 
 ## Finding files
 

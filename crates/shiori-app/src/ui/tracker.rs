@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gpui::{Context, Task};
 use jiff::Zoned;
-use shiori_core::recognition::Relations;
+use shiori_core::recognition::{MatchReason, Relations};
 use shiori_core::{
     AnimeId, Episode, SessionInput, SessionOutput, UpdateSession, UpdateState,
     entry_with_episode_watched,
@@ -166,6 +166,7 @@ impl Model {
         if let Some((elements, id)) = &self.tracker.manual {
             if *elements == media.episode.elements {
                 media.episode.anime_id = Some(*id);
+                media.matched = Some(MatchReason::Manual);
             } else {
                 self.tracker.manual = None;
             }
@@ -189,6 +190,7 @@ impl Model {
             return;
         };
         media.episode.anime_id = Some(id);
+        media.matched = Some(MatchReason::Manual);
         self.tracker.manual = Some((media.episode.elements.clone(), id));
         let episode = media.episode.clone();
         self.send_to_session(Some(episode), cx);

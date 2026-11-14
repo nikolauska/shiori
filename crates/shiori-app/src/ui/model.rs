@@ -62,6 +62,8 @@ impl EventEmitter<AppEvent> for Model {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiRequest {
     OpenAnime(AnimeId),
+    /// Show the anime that is playing, on its Now playing tab.
+    ShowNowPlaying(AnimeId),
 }
 
 impl EventEmitter<UiRequest> for Model {}
@@ -526,6 +528,14 @@ impl Model {
     pub fn open_anime(&mut self, id: AnimeId, cx: &mut Context<Self>) {
         self.select(id, cx);
         cx.emit(UiRequest::OpenAnime(id));
+    }
+
+    /// Asks the main window to show the playing anime and why it matched.
+    pub fn show_now_playing(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = super::now_playing::playing_anime(self) {
+            self.select(id, cx);
+            cx.emit(UiRequest::ShowNowPlaying(id));
+        }
     }
 
     // ---- Synchronize --------------------------------------------------------

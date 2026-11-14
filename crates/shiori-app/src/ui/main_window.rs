@@ -61,9 +61,13 @@ impl MainWindow {
             cx.subscribe_in(
                 &model,
                 window,
-                |this, _, request: &UiRequest, window, cx| {
-                    let UiRequest::OpenAnime(id) = *request;
-                    this.open_anime(id, window, cx);
+                |this, _, request: &UiRequest, window, cx| match *request {
+                    UiRequest::OpenAnime(id) => this.open_anime(id, window, cx),
+                    UiRequest::ShowNowPlaying(id) => {
+                        this.open_anime(id, window, cx);
+                        this.inspector
+                            .update(cx, |inspector, cx| inspector.show_now_playing(cx));
+                    }
                 },
             ),
             cx.observe_window_bounds(window, |this, window, cx| {
@@ -505,6 +509,8 @@ impl MainWindow {
     }
 
     fn render_status_line(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        // Built first: it loads posters, which needs the context mutably.
+        let playing = now_playing::view(&self.model, cx);
         let model = self.model.read(cx);
         let status = &model.status;
         let service = model.service_name();
@@ -531,8 +537,8 @@ impl MainWindow {
             .text_xs()
             // While media is detected the bar shows it instead of the last
             // status message; the sync state stays on the right.
-            .map(|bar| match now_playing::view(&self.model, cx) {
-                Some(playing) => bar.child(playing),
+            .map(|bar| match playing {
+                Some(playing) => bar.py_1p5().child(playing),
                 None => bar.child(
                     div()
                         .flex_1()

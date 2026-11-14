@@ -6,8 +6,8 @@ mod normalize;
 mod parse;
 mod relations;
 
-pub use identify::identify;
-pub use index::TitleIndex;
+pub use identify::{MatchReason, identify, identify_with_reason};
+pub use index::{TitleIndex, TitleKind};
 pub use normalize::normalize;
 pub use parse::{ParseOptions, parse, parse_path};
 pub use relations::{Redirection, Relations};

@@ -6,15 +6,34 @@ use crate::anime::{Anime, AnimeId};
 use crate::entry::AnimeSettings;
 use crate::recognition::normalize;
 
-/// Weights decide which anime wins when several share a title.
-const WEIGHT_USER_SYNONYM: f32 = 2.0;
-const WEIGHT_MAIN_TITLE: f32 = 1.0;
-const WEIGHT_TITLE_WITH_YEAR: f32 = 0.5;
-const WEIGHT_SERVICE_SYNONYM: f32 = 0.5;
+/// Where a title in the index came from. Kept so that the UI can say why
+/// a file matched an anime, not only which one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TitleKind {
+    /// One of the user's alternative titles in the per-anime settings.
+    UserSynonym,
+    /// The romaji, English or Japanese title.
+    MainTitle,
+    /// The romaji title with the start year, "Title (2019)".
+    TitleWithYear,
+    /// A synonym from the service.
+    ServiceSynonym,
+}
+
+impl TitleKind {
+    /// Weights decide which anime wins when several share a title.
+    pub fn weight(self) -> f32 {
+        match self {
+            Self::UserSynonym => 2.0,
+            Self::MainTitle => 1.0,
+            Self::TitleWithYear | Self::ServiceSynonym => 0.5,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TitleIndex {
-    titles: HashMap<String, HashMap<AnimeId, f32>>,
+    titles: HashMap<String, HashMap<AnimeId, TitleKind>>,
 }
 
 impl TitleIndex {
@@ -37,12 +56,12 @@ impl TitleIndex {
     pub fn add(&mut self, anime: &Anime, settings: Option<&AnimeSettings>) {
         if let Some(settings) = settings {
             for synonym in &settings.synonyms {
-                self.insert(synonym, anime.id, WEIGHT_USER_SYNONYM);
+                self.insert(synonym, anime.id, TitleKind::UserSynonym);
             }
         }
         let titles = &anime.titles;
         for title in [&titles.romaji, &titles.english, &titles.japanese] {
-            self.insert(title, anime.id, WEIGHT_MAIN_TITLE);
+            self.insert(title, anime.id, TitleKind::MainTitle);
         }
         // Lets "Title (2019)" pick the right one of two anime with the same
         // title, as release names often add the year to tell them apart.
@@ -51,11 +70,11 @@ impl TitleIndex {
             let year = year.to_string();
             if !titles.romaji.contains(&year) {
                 let with_year = format!("{} ({year})", titles.romaji);
-                self.insert(&with_year, anime.id, WEIGHT_TITLE_WITH_YEAR);
+                self.insert(&with_year, anime.id, TitleKind::TitleWithYear);
             }
         }
         for synonym in &titles.synonyms {
-            self.insert(synonym, anime.id, WEIGHT_SERVICE_SYNONYM);
+            self.insert(synonym, anime.id, TitleKind::ServiceSynonym);
         }
     }
 
@@ -75,15 +94,24 @@ impl TitleIndex {
     /// Anime with this title, strongest first. Equal weights are ordered by
     /// id so the result does not depend on hash order.
     pub fn lookup(&self, title: &str) -> Vec<(AnimeId, f32)> {
+        self.lookup_kinds(title)
+            .into_iter()
+            .map(|(id, kind)| (id, kind.weight()))
+            .collect()
+    }
+
+    /// Like `lookup`, with the kind of title each anime matched by. An anime
+    /// that has the title several ways gets the strongest one.
+    pub fn lookup_kinds(&self, title: &str) -> Vec<(AnimeId, TitleKind)> {
         let Some(matches) = self.titles.get(&normalize(title)) else {
             return Vec::new();
         };
-        let mut matches: Vec<_> = matches.iter().map(|(id, w)| (*id, *w)).collect();
-        matches.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        let mut matches: Vec<_> = matches.iter().map(|(id, k)| (*id, *k)).collect();
+        matches.sort_by(|a, b| b.1.weight().total_cmp(&a.1.weight()).then(a.0.cmp(&b.0)));
         matches
     }
 
-    fn insert(&mut self, title: &str, id: AnimeId, weight: f32) {
+    fn insert(&mut self, title: &str, id: AnimeId, kind: TitleKind) {
         let normalized = normalize(title);
         if normalized.is_empty() {
             return;
@@ -93,9 +121,9 @@ impl TitleIndex {
             .entry(normalized)
             .or_default()
             .entry(id)
-            .or_insert(weight);
-        if *entry < weight {
-            *entry = weight;
+            .or_insert(kind);
+        if entry.weight() < kind.weight() {
+            *entry = kind;
         }
     }
 }

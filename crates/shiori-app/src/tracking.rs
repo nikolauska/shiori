@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use shiori_core::recognition::{ParseOptions, Relations, identify, parse, parse_path};
+use shiori_core::recognition::{
+    MatchReason, ParseOptions, Relations, identify_with_reason, parse, parse_path,
+};
 use shiori_core::{Anime, AnimeId, Episode, ListEntry, Lookup, UpdateSettings};
 use shiori_detect::{Detected, MediaInfoKind, Player, PlayerType, WindowId};
 use shiori_store::{Folders, Settings};
@@ -54,6 +56,8 @@ pub struct Media {
     pub url: Option<String>,
     /// Parsed; `anime_id` is set once identified.
     pub episode: Episode,
+    /// Why `episode.anime_id` is what it is; `None` while not identified.
+    pub matched: Option<MatchReason>,
 }
 
 /// The media to follow among `results`, parsed but not identified.
@@ -116,17 +120,19 @@ pub fn choose_media(
         source,
         url,
         episode,
+        matched: None,
     })
 }
 
 /// Identifies the episode in place against the list and the database.
 pub fn identify_media(media: &mut Media, state: &AppState, relations: &Relations) {
-    identify(
+    media.matched = identify_with_reason(
         &mut media.episode,
         &state.title_index,
         &state.anime,
         relations,
-    );
+    )
+    .map(|(_, reason)| reason);
 }
 
 /// Whether the file is outside every library folder while the settings

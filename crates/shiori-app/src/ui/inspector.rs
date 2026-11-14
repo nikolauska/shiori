@@ -30,7 +30,7 @@ use shiori_app::state::AppEvent;
 use super::library::PlayChoice;
 use super::model::Model;
 use super::widgets::Choice;
-use super::{format, poster, style};
+use super::{format, now_playing, poster, style};
 
 /// Shows an anime: selects it, and the main window brings up the inspector
 /// or the full page. Old data is fetched again on the way.
@@ -64,6 +64,9 @@ fn status_choices() -> Vec<Choice<ListStatus>> {
         .map(|&status| Choice::new(format::status_label(status), status))
         .collect()
 }
+
+/// Index of the Now playing tab, after List, Details and Settings.
+const NOW_PLAYING_TAB: usize = 3;
 
 pub struct Inspector {
     model: Entity<Model>,
@@ -230,6 +233,13 @@ impl Inspector {
             AppEvent::AnimeDeleted { id, .. } if *id == shown => self.id = None,
             _ => {}
         }
+        cx.notify();
+    }
+
+    /// Switches to the Now playing tab; it shows only while the selected
+    /// anime is the one playing.
+    pub fn show_now_playing(&mut self, cx: &mut Context<Self>) {
+        self.tab = NOW_PLAYING_TAB;
         cx.notify();
     }
 
@@ -838,10 +848,17 @@ impl Render for Inspector {
                 .child("Select an anime to see it here.")
                 .into_any_element();
         };
+        // The Now playing tab exists only while this anime is playing; when
+        // playback ends or moves on, fall back to the List tab.
+        let playing = now_playing::playing_anime(self.model.read(cx)) == Some(id);
+        if self.tab == NOW_PLAYING_TAB && !playing {
+            self.tab = 0;
+        }
         let tab = match self.tab {
             0 => self.render_list(id, cx),
             1 => self.render_details(id, cx),
-            _ => self.render_settings(cx),
+            2 => self.render_settings(cx),
+            _ => now_playing::tab(&self.model, id, cx),
         };
         v_flex()
             .id("inspector")
@@ -857,6 +874,7 @@ impl Render for Inspector {
                     .child(Tab::new().label("List"))
                     .child(Tab::new().label("Details"))
                     .child(Tab::new().label("Settings"))
+                    .when(playing, |tabs| tabs.child(Tab::new().label("Now playing")))
                     .on_click(cx.listener(|this, ix: &usize, _, cx| {
                         this.tab = *ix;
                         cx.notify();

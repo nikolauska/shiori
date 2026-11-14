@@ -26,7 +26,7 @@ If several players are running, Shiori follows one of them. It stays with the sa
 
 ## Now playing
 
-What Shiori currently detects is shown as "now playing", together with what will happen to your list. The tray icon shows a small mark: one color while the video is recognized as an anime, another while something is playing that Shiori could not recognize, and none when nothing is playing.
+What Shiori currently detects is shown as "now playing", together with what will happen to your list: the anime's poster and title, which episode of how many, how far you have watched, the player and the file. Clicking it opens the anime on its "Now playing" tab, which also says why Shiori thinks the video is that anime: which title it read and what it matched, a numbering translation, or your own pick. The tray icon shows a small mark: one color while the video is recognized as an anime, another while something is playing that Shiori could not recognize, and none when nothing is playing.
 
 ## When detection stops
 

@@ -4,7 +4,31 @@ use std::collections::BTreeMap;
 
 use crate::anime::{Anime, AnimeId};
 use crate::episode::{ElementKind, Episode};
+use crate::recognition::index::TitleKind;
 use crate::recognition::{Relations, TitleIndex};
+
+/// Why an episode was matched to its anime, for showing to the user.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchReason {
+    /// The file's `title`, with `season` when the season had to be added to
+    /// find it, is a title of the anime.
+    Title {
+        title: String,
+        season: Option<u32>,
+        kind: TitleKind,
+    },
+    /// The title matched `from`, whose numbering does not have the episode;
+    /// the relations file moved episodes `from_range` to the anime.
+    Redirect {
+        title: String,
+        season: Option<u32>,
+        kind: TitleKind,
+        from: AnimeId,
+        from_range: (u32, u32),
+    },
+    /// The user picked the anime by hand.
+    Manual,
+}
 
 /// Finds the anime a parsed episode belongs to. On a relations redirect the
 /// episode's numbers are rewritten to the destination's numbering. Also sets
@@ -15,9 +39,19 @@ pub fn identify(
     anime: &BTreeMap<AnimeId, Anime>,
     relations: &Relations,
 ) -> Option<AnimeId> {
-    let id = find(episode, index, anime, relations);
-    episode.anime_id = id;
-    id
+    identify_with_reason(episode, index, anime, relations).map(|(id, _)| id)
+}
+
+/// `identify`, also saying why the anime was chosen.
+pub fn identify_with_reason(
+    episode: &mut Episode,
+    index: &TitleIndex,
+    anime: &BTreeMap<AnimeId, Anime>,
+    relations: &Relations,
+) -> Option<(AnimeId, MatchReason)> {
+    let found = find(episode, index, anime, relations);
+    episode.anime_id = found.as_ref().map(|(id, _)| *id);
+    found
 }
 
 fn find(
@@ -25,17 +59,25 @@ fn find(
     index: &TitleIndex,
     anime: &BTreeMap<AnimeId, Anime>,
     relations: &Relations,
-) -> Option<AnimeId> {
+) -> Option<(AnimeId, MatchReason)> {
     // Openings, endings and previews never count as episodes.
     if !is_valid_episode_type(episode) {
         return None;
     }
-    for id in candidates(episode, index) {
+    for (id, season, kind) in candidates(episode, index) {
+        let title = episode.title().unwrap_or_default().to_owned();
         let Some(item) = anime.get(&id) else {
             continue;
         };
         if is_valid_episode_number(episode, item) {
-            return Some(id);
+            return Some((
+                id,
+                MatchReason::Title {
+                    title,
+                    season,
+                    kind,
+                },
+            ));
         }
         let Some(range) = episode.episode_number_range() else {
             continue;
@@ -48,7 +90,14 @@ fn find(
                 format_range(redirect.episode_range)
             );
             episode.set_episode_number_range(redirect.episode_range);
-            return Some(redirect.id);
+            let reason = MatchReason::Redirect {
+                title,
+                season,
+                kind,
+                from: id,
+                from_range: range,
+            };
+            return Some((redirect.id, reason));
         }
     }
     None
@@ -59,20 +108,23 @@ fn find(
 /// looking like the first season. So with a season above 1 the title with
 /// the season goes first ("show2" after normalizing, as the index has it),
 /// then the bare title for files that number seasons the index lacks.
-fn candidates(episode: &Episode, index: &TitleIndex) -> Vec<AnimeId> {
+fn candidates(episode: &Episode, index: &TitleIndex) -> Vec<(AnimeId, Option<u32>, TitleKind)> {
     let title = episode.title().unwrap_or_default();
     let season = episode
         .get(ElementKind::Season)
         .and_then(|s| s.trim().parse::<u32>().ok())
         .filter(|&s| s > 1);
-    let mut ids: Vec<AnimeId> = Vec::new();
-    let with_season = season.map(|s| index.lookup(&format!("{title} season {s}")));
-    for (id, _) in with_season.into_iter().flatten().chain(index.lookup(title)) {
-        if !ids.contains(&id) {
-            ids.push(id);
+    let with_season = season.map(|s| (Some(s), index.lookup_kinds(&format!("{title} season {s}"))));
+    let bare = (None, index.lookup_kinds(title));
+    let mut found: Vec<(AnimeId, Option<u32>, TitleKind)> = Vec::new();
+    for (season, matches) in with_season.into_iter().chain([bare]) {
+        for (id, kind) in matches {
+            if !found.iter().any(|(seen, _, _)| *seen == id) {
+                found.push((id, season, kind));
+            }
         }
     }
-    ids
+    found
 }
 
 fn format_range((first, last): (u32, u32)) -> String {
@@ -230,6 +282,82 @@ mod tests {
             run(&f, "[Group] Toradora! [1080p]").0,
             Some(2),
             "batch name"
+        );
+    }
+
+    #[test]
+    fn reason_names_the_title_and_its_kind() {
+        let f = fixture();
+        let mut episode = parse("[Group] Toradora! - 05.mkv", ParseOptions::default());
+        let found = identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations);
+        assert_eq!(
+            found,
+            Some((
+                AnimeId(2),
+                MatchReason::Title {
+                    title: "Toradora!".into(),
+                    season: None,
+                    kind: TitleKind::MainTitle
+                }
+            ))
+        );
+
+        let mut episode = parse(
+            "[Group] Tensei Shitara Slime Datta Ken S2 - 08.mkv",
+            ParseOptions::default(),
+        );
+        let (_, reason) =
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations).unwrap();
+        // The season had to be added to find the anime, so the reason says so.
+        assert_eq!(
+            reason,
+            MatchReason::Title {
+                title: "Tensei Shitara Slime Datta Ken".into(),
+                season: Some(2),
+                kind: TitleKind::MainTitle
+            }
+        );
+    }
+
+    #[test]
+    fn reason_of_a_redirect_names_where_it_came_from() {
+        let f = fixture();
+        let mut episode = parse(
+            "[Group] Tensei Shitara Slime Datta Ken - 14 [1080p].mkv",
+            ParseOptions::default(),
+        );
+        let found = identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations);
+        assert_eq!(
+            found,
+            Some((
+                AnimeId(127366),
+                MatchReason::Redirect {
+                    title: "Tensei Shitara Slime Datta Ken".into(),
+                    season: None,
+                    kind: TitleKind::MainTitle,
+                    from: AnimeId(116242),
+                    from_range: (14, 14),
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn a_user_synonym_is_reported_as_such() {
+        let mut f = fixture();
+        let mut settings = crate::entry::AnimeSettings::new(AnimeId(2));
+        settings.synonyms = vec!["Tiger Dragon".into()];
+        f.index.update(&f.anime[&AnimeId(2)], Some(&settings));
+        let mut episode = parse("[Group] Tiger Dragon - 05.mkv", ParseOptions::default());
+        let (_, reason) =
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations).unwrap();
+        assert_eq!(
+            reason,
+            MatchReason::Title {
+                title: "Tiger Dragon".into(),
+                season: None,
+                kind: TitleKind::UserSynonym
+            }
         );
     }
 
