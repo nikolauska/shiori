@@ -10,6 +10,8 @@ mod link_picker;
 mod main_window;
 mod model;
 mod now_playing;
+mod numbering;
+mod numbering_editor;
 mod pages;
 mod poster;
 mod style;

@@ -10,7 +10,7 @@ use anyhow::Result;
 use jiff::Timestamp;
 use shiori_core::anime::preferred_title;
 use shiori_core::entry::changed_fields;
-use shiori_core::recognition::{TitleIndex, link_title};
+use shiori_core::recognition::{Numbering, NumberingSequence, TitleIndex, link_title};
 use shiori_core::{Anime, AnimeId, AnimeSettings, FuzzyDate, HistoryItem, ListEntry, ServiceId};
 use shiori_store::{Accounts, Database, Settings};
 use shiori_sync::queue::{Reconcile, Step};
@@ -29,6 +29,8 @@ pub enum AppEvent {
     QueueChanged,
     HistoryChanged,
     AnimeSettingsUpdated(AnimeId),
+    /// A remembered numbering was saved or forgotten.
+    NumberingChanged,
     /// The user changed settings; titles and their order may differ.
     SettingsChanged,
     QueueProcessing(AnimeId),
@@ -48,6 +50,8 @@ pub struct AppState {
     pub history: Vec<HistoryItem>,
     pub queue: SyncQueue,
     pub title_index: TitleIndex,
+    /// Remembered episode numbering, used by recognition.
+    pub numbering: Numbering,
     pub settings: Settings,
     pub accounts: Accounts,
     /// Set by a successful sign-in in this run; never stored.
@@ -68,6 +72,7 @@ impl AppState {
             history: loaded.history,
             queue: SyncQueue::new(loaded.queue),
             title_index,
+            numbering: Numbering::new(loaded.numbering),
             settings,
             accounts,
             signed_in: false,
@@ -346,6 +351,35 @@ impl AppState {
         Ok(events)
     }
 
+    /// Validates and saves a remembered numbering, then uses it. On any
+    /// failure the previous numbering stays as it was. Returns the saved
+    /// sequence, with its id.
+    pub fn save_numbering(
+        &mut self,
+        mut sequence: NumberingSequence,
+    ) -> Result<(NumberingSequence, Vec<AppEvent>)> {
+        let anime = &self.anime;
+        sequence
+            .validate(
+                |id| anime.get(&id).and_then(|a| a.episode_count),
+                &self.numbering,
+            )
+            .map_err(|error| anyhow::anyhow!(error.message(|id| self.title(id))))?;
+        // Whole seconds, as stored, so memory and database agree.
+        sequence.saved = Timestamp::from_second(Timestamp::now().as_second())?;
+        sequence.id = self.db.save_numbering(&sequence)?;
+        // Only after the write: a failed save must not change recognition.
+        self.numbering.insert(sequence.clone());
+        Ok((sequence, vec![AppEvent::NumberingChanged]))
+    }
+
+    /// Forgets a remembered numbering. Anime, list and history stay.
+    pub fn forget_numbering(&mut self, id: i64) -> Result<Vec<AppEvent>> {
+        self.db.delete_numbering(id)?;
+        self.numbering.remove(id);
+        Ok(vec![AppEvent::NumberingChanged])
+    }
+
     /// What is in the database, to check that changes were written through.
     #[cfg(test)]
     pub fn stored(&self) -> shiori_store::Loaded {
@@ -447,6 +481,50 @@ mod tests {
         assert_eq!(state.stored().anime_settings[&AnimeId(1)], settings);
         // Saving the same settings again changes nothing.
         assert!(state.save_anime_settings(settings).unwrap().is_empty());
+    }
+
+    #[test]
+    fn numbering_is_validated_saved_and_forgotten() {
+        use shiori_core::recognition::SequenceEntry;
+        let mut state = state();
+        let mut one = Anime::new(AnimeId(1));
+        one.titles.romaji = "Show".into();
+        one.episode_count = Some(12);
+        let mut two = one.clone();
+        two.id = AnimeId(2);
+        two.titles.romaji = "Show 2".into();
+        state.store_anime(vec![one, two]).unwrap();
+        let mut sequence = NumberingSequence {
+            id: 0,
+            root: AnimeId(1),
+            entries: vec![
+                SequenceEntry {
+                    anime: AnimeId(1),
+                    first: 1,
+                    last: 12,
+                },
+                SequenceEntry {
+                    anime: AnimeId(2),
+                    first: 12,
+                    last: 23,
+                },
+            ],
+            saved: Timestamp::UNIX_EPOCH,
+        };
+        let error = state.save_numbering(sequence.clone()).unwrap_err();
+        assert_eq!(error.to_string(), "Show and Show 2 overlap.");
+        assert!(state.numbering.sequences().is_empty());
+
+        sequence.entries[1].first = 13;
+        sequence.entries[1].last = 24;
+        let (saved, events) = state.save_numbering(sequence).unwrap();
+        assert_eq!(events, [AppEvent::NumberingChanged]);
+        assert_eq!(state.numbering.of(AnimeId(2)).map(|s| s.id), Some(saved.id));
+        assert_eq!(state.stored().numbering, std::slice::from_ref(&saved));
+
+        state.forget_numbering(saved.id).unwrap();
+        assert!(state.numbering.of(AnimeId(2)).is_none());
+        assert!(state.stored().numbering.is_empty());
     }
 
     #[test]

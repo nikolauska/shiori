@@ -48,6 +48,17 @@ Some releases number a second season as a continuation of the first: episode 14 
 
 The same list handles specials that are numbered as episode 0 or placed between regular episodes.
 
+**When the list does not know the series**, Shiori looks at how AniList links the anime: its prequels and sequels. If the title matched an anime but the episode number is above its episode count, "now playing" asks, for example, "Is it Sasaki to Pii-chan Season 2, episode 4?". You can:
+
+- **Use and remember**: Shiori saves this numbering and uses it for every later file of these seasons, without asking.
+- **Use once**: only for what is playing now.
+- **Review…**: open the numbering to check or change it first.
+- **Dismiss**: leave the file unrecognized for now. Nothing is saved.
+
+Shiori asks you to review instead of offering one answer when it cannot be sure: the seasons branch, an episode count is unknown, no season holds the number, or "Season 2 - 18" could count from the first season or from the second. Nothing in your list changes until you answer.
+
+**Remembered numbering** lists the anime that share one numbering and the release numbers each covers, such as 1–12 and 13–24. Shiori uses it only for numbers above an anime's own episode count, so "Season 2 - 04" stays episode 4. Gaps mean no match. Movies, specials and side stories are left out unless you include them, for example a special numbered 0. You can make or edit one from the anime's settings ("Episode numbering..."), from the Library's menu on a file whose number is too high, and from Settings, Recognition, which also lists your title links. Forgetting a numbering asks first and never changes your list or history. Remembered numbering is kept on this computer only and is for AniList for now.
+
 ## When recognition is wrong or fails
 
 **Nothing is recognized.** "Now playing" shows the title Shiori read, and offers the anime with the closest titles as one-click choices. "Link anime…" opens a picker: close matches, your list, and a search on AniList, each saying what would happen to your list if you picked it ("Next episode", "Already watched", "Adds to Watching"). While the picker is open, the countdown waits.

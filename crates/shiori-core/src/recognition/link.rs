@@ -225,11 +225,26 @@ mod tests {
 
         let mut episode = parse("[Other] Kusuriya S3 - 08.mkv", ParseOptions::default());
         assert_eq!(
-            identify(&mut episode, &index, &anime, &relations),
+            identify(
+                &mut episode,
+                &index,
+                &anime,
+                &relations,
+                &Default::default()
+            ),
             Some(AnimeId(3))
         );
         let mut episode = parse("[Other] Kusuriya - 05.mkv", ParseOptions::default());
-        assert_eq!(identify(&mut episode, &index, &anime, &relations), None);
+        assert_eq!(
+            identify(
+                &mut episode,
+                &index,
+                &anime,
+                &relations,
+                &Default::default()
+            ),
+            None
+        );
     }
 
     #[test]

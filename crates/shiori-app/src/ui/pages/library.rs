@@ -21,7 +21,8 @@ use shiori_core::Episode;
 use shiori_library::{Node, NodeKind};
 
 use crate::ui::model::Model;
-use crate::ui::{actions, inspector, link_picker};
+use crate::ui::{actions, inspector, link_picker, numbering_editor};
+use shiori_core::recognition::number_miss;
 
 gpui::actions!(library, [OpenItem, RenameItem, DeleteItem]);
 
@@ -208,6 +209,14 @@ impl TableDelegate for LibraryDelegate {
         // A video file that was read but matched nothing.
         let unrecognized = self.episode(&row, cx).is_some_and(|e| e.anime_id.is_none());
         let path = row.path.clone();
+        // The title matched, but the number is above the anime's count.
+        let miss = self
+            .episode(&row, cx)
+            .filter(|e| e.anime_id.is_none())
+            .and_then(|e| {
+                let state = self.model.read(cx).state();
+                number_miss(e, &state.title_index, &state.anime)
+            });
         let page = self.page.clone();
         let call = move |f: fn(&mut LibraryPage, Row, &mut Window, &mut Context<LibraryPage>)| {
             let page = page.clone();
@@ -217,6 +226,20 @@ impl TableDelegate for LibraryDelegate {
             }
         };
         let mut menu = menu.item(PopupMenuItem::new("Open").on_click(call(LibraryPage::open)));
+        if let Some(miss) = miss {
+            let model = self.model.clone();
+            menu = menu.item(PopupMenuItem::new("Episode numbering...").on_click(
+                move |_, window, cx| {
+                    numbering_editor::open_for_anime(
+                        &model,
+                        miss.anime,
+                        Some((miss.anime, miss.range.1)),
+                        window,
+                        cx,
+                    )
+                },
+            ));
+        }
         if unrecognized {
             let model = self.model.clone();
             menu = menu.item(PopupMenuItem::new("Link to anime...").on_click(

@@ -31,7 +31,7 @@ use shiori_app::state::AppEvent;
 use super::library::PlayChoice;
 use super::model::Model;
 use super::widgets::Choice;
-use super::{format, now_playing, poster, style};
+use super::{format, now_playing, numbering_editor, poster, style};
 
 /// Shows an anime: selects it, and the main window brings up the inspector
 /// or the full page. Old data is fetched again on the way.
@@ -814,6 +814,43 @@ impl Inspector {
         )
     }
 
+    /// Whether the anime is in a remembered episode numbering, and the way
+    /// to edit or make one.
+    fn numbering_row(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let id = self.id?;
+        let state = self.model.read(cx).state();
+        let text = match state.numbering.of(id) {
+            Some(s) => format!(
+                "In a remembered episode numbering of {} anime, starting with {}.",
+                s.entries.len(),
+                state.title(s.root)
+            ),
+            None => "For releases that number episodes across seasons.".to_owned(),
+        };
+        let model = self.model.clone();
+        Some(
+            v_flex()
+                .gap_1()
+                .pt_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(text),
+                )
+                .child(
+                    h_flex().child(
+                        Button::new("numbering")
+                            .small()
+                            .label("Episode numbering...")
+                            .on_click(move |_, window, cx| {
+                                numbering_editor::open_for_anime(&model, id, None, window, cx)
+                            }),
+                    ),
+                ),
+        )
+    }
+
     fn render_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         v_flex()
@@ -838,6 +875,7 @@ impl Inspector {
             )
             .child(div().text_xs().text_color(muted).child("Display title"))
             .child(Input::new(&self.display_title).small())
+            .children(self.numbering_row(cx))
             .into_any_element()
     }
 }

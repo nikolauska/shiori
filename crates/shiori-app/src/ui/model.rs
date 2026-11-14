@@ -4,12 +4,13 @@
 //! runtime; their answers come back to the main thread and are applied to
 //! `AppState` there, so the state is never shared across threads.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
 
 use gpui::{Context, EventEmitter, SharedString, Task};
 use jiff::Timestamp;
-use shiori_core::{AnimeId, AnimeSettings, ListEntry, SearchParams};
+use shiori_core::{AnimeId, AnimeSettings, ListEntry, Relation, SearchParams};
 use shiori_store::{SecretKey, Session, Settings};
 use shiori_sync::anilist::AniList;
 use shiori_sync::queue::{Request, Step};
@@ -51,6 +52,10 @@ pub struct Model {
     pub selected: Option<AnimeId>,
     pub tracker: Tracker,
     pub library: Library,
+    /// AniList relations fetched in this run, for episode numbering. Kept in
+    /// memory only: suggestions need AniList anyway, and saved numberings
+    /// do not depend on them.
+    pub relations: HashMap<AnimeId, Vec<Relation>>,
     /// Called when an update needs the user's say; the UI decides how to
     /// ask (a notification, unless the main window is active).
     pub confirm_hook: Option<ConfirmHook>,
@@ -97,12 +102,17 @@ impl Model {
             selected: None,
             library: Library::default(),
             tracker: Tracker::default(),
+            relations: HashMap::new(),
             confirm_hook: None,
         })
     }
 
     pub fn state(&self) -> &AppState {
         &self.startup.state
+    }
+
+    pub(super) fn service(&self) -> &AniList {
+        &self.service
     }
 
     pub fn service_name(&self) -> &'static str {
@@ -133,7 +143,7 @@ impl Model {
 
     /// Runs `request` on the network thread and hands its result to `then`
     /// on the main thread.
-    fn request<T: Send + 'static>(
+    pub(super) fn request<T: Send + 'static>(
         &mut self,
         request: impl Future<Output = T> + Send + 'static,
         cx: &mut Context<Self>,

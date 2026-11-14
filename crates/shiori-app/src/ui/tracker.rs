@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use gpui::{AnyWeakEntity, Context, Task};
 use jiff::Zoned;
-use shiori_core::recognition::{MatchReason, Relations, is_generic_title, title_to_remember};
+use shiori_core::recognition::{
+    MatchReason, Relations, Resolved, is_generic_title, normalize, title_to_remember,
+};
 use shiori_core::{
     AnimeId, Episode, SessionInput, SessionOutput, UpdateSession, UpdateState,
     entry_with_episode_watched,
@@ -19,6 +21,7 @@ use shiori_app::tracking::{
 };
 
 use super::model::Model;
+use super::numbering::Suggestion;
 
 /// Whether the tray icon should show a badge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +29,17 @@ pub enum Badge {
     None,
     Identified,
     Unidentified,
+}
+
+/// What the user decided the playing media is, for this playback only.
+#[derive(Debug, Clone)]
+struct Manual {
+    /// The media it applies to, as parsed.
+    elements: Vec<shiori_core::Element>,
+    /// The episode to use instead of identifying it: the anime, and the
+    /// numbers when a numbering was used once.
+    episode: Episode,
+    reason: MatchReason,
 }
 
 #[derive(Default)]
@@ -36,7 +50,13 @@ pub struct Tracker {
     /// The anime the user picked for this playback only, for the media
     /// parsed into these elements. Kept so that the next poll's
     /// identification does not undo the choice.
-    manual: Option<(Vec<shiori_core::Element>, AnimeId)>,
+    manual: Option<Manual>,
+    /// The episode numbering suggestion for media whose number is above
+    /// its anime's count.
+    pub suggestion: Option<Suggestion>,
+    /// Media whose suggestion the user dismissed, as parsed; asked again
+    /// only for other media.
+    pub dismissed: Vec<Vec<shiori_core::Element>>,
     /// Anime with titles close to the media's, while it is not recognized:
     /// the bar offers the first ones and the picker lists them.
     pub suggestions: Vec<AnimeId>,
@@ -167,20 +187,20 @@ impl Model {
         }
     }
 
-    fn media_found(&mut self, media: Option<Media>, cx: &mut Context<Self>) {
+    pub(super) fn media_found(&mut self, media: Option<Media>, cx: &mut Context<Self>) {
         let Some(mut media) = media else {
             if self.tracker.media.take().is_some() {
                 self.tracker.manual = None;
+                self.tracker.suggestion = None;
                 self.send_to_session(None, cx);
             }
             return;
         };
         identify_media(&mut media, self.state(), &self.tracker.relations);
-        if let Some((elements, id)) = &self.tracker.manual {
-            if *elements == media.parsed.elements {
-                media.episode = media.parsed.clone();
-                media.episode.anime_id = Some(*id);
-                media.matched = Some(MatchReason::Manual);
+        if let Some(manual) = &self.tracker.manual {
+            if manual.elements == media.parsed.elements {
+                media.episode = manual.episode.clone();
+                media.matched = Some(manual.reason.clone());
             } else {
                 self.tracker.manual = None;
             }
@@ -204,9 +224,47 @@ impl Model {
         });
         let episode = media.episode.clone();
         self.tracker.media = Some(media);
+        self.update_suggestion(cx);
         if changed {
             self.send_to_session(Some(episode), cx);
         }
+    }
+
+    /// Uses `episode` for the playing media until it changes.
+    fn apply_manual(&mut self, episode: Episode, reason: MatchReason, cx: &mut Context<Self>) {
+        let Some(mut media) = self.tracker.media.clone() else {
+            return;
+        };
+        media.episode = episode.clone();
+        media.matched = Some(reason.clone());
+        self.tracker.manual = Some(Manual {
+            elements: media.parsed.elements.clone(),
+            episode: episode.clone(),
+            reason,
+        });
+        self.tracker.suggestions.clear();
+        self.tracker.suggestion = None;
+        self.tracker.media = Some(media);
+        self.send_to_session(Some(episode), cx);
+    }
+
+    /// The playing media is `resolved` by a numbering the user chose to use
+    /// once, not remember.
+    pub(super) fn apply_numbering_once(
+        &mut self,
+        from: AnimeId,
+        resolved: Resolved,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(media) = &self.tracker.media else {
+            return;
+        };
+        let mut episode = media.parsed.clone();
+        let from_range = episode.episode_number_range().unwrap_or_default();
+        episode.set_episode_number_range(resolved.range);
+        episode.anime_id = Some(resolved.anime);
+        let reason = MatchReason::NumberingOnce { from, from_range };
+        self.apply_manual(episode, reason, cx);
     }
 
     /// "Set as now playing" and the bar's suggestions: links the playing
@@ -236,19 +294,37 @@ impl Model {
             if self.tracker.media.as_ref().and_then(|m| m.episode.anime_id) == Some(id) {
                 return;
             }
+            // The title now matches, but the number is above the anime's
+            // count: the numbering suggestion takes over from here.
+            if self
+                .tracker
+                .suggestion
+                .as_ref()
+                .is_some_and(|s| s.miss.anime == id)
+            {
+                return;
+            }
         }
-        // Once only, or the title is remembered but this episode still does
-        // not fit the anime (a number above its count): link it by hand so
-        // the bar says why it will not update.
-        let mut media = media;
-        media.episode = media.parsed.clone();
-        media.episode.anime_id = Some(id);
-        media.matched = Some(MatchReason::Manual);
-        self.tracker.manual = Some((media.parsed.elements.clone(), id));
-        self.tracker.suggestions.clear();
-        let episode = media.episode.clone();
-        self.tracker.media = Some(media);
-        self.send_to_session(Some(episode), cx);
+        // Once only, or the episode still does not fit and nothing can be
+        // suggested: link it by hand so the bar says why it will not update.
+        let mut episode = media.parsed.clone();
+        episode.anime_id = Some(id);
+        self.apply_manual(episode, MatchReason::Manual, cx);
+    }
+
+    /// Undoes a link: the title is no longer an alternative title of `id`.
+    pub fn unlink_title(&mut self, id: AnimeId, title: &str, cx: &mut Context<Self>) {
+        let Some(mut settings) = self.state().anime_settings.get(&id).cloned() else {
+            return;
+        };
+        let key = normalize(title);
+        settings.synonyms.retain(|s| normalize(s) != key);
+        settings.linked.retain(|l| normalize(&l.title) != key);
+        self.save_anime_settings(settings, cx);
+        self.recognize_library_title(title, cx);
+        if let Some(media) = self.tracker.media.clone() {
+            self.media_found(Some(media), cx);
+        }
     }
 
     /// Remembers `title` as an alternative title of `id`, then looks at

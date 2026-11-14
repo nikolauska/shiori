@@ -10,6 +10,7 @@ pub mod entry;
 pub mod episode;
 pub mod queue;
 pub mod recognition;
+pub mod relation;
 pub mod search;
 pub mod service;
 pub mod tracking;
@@ -21,6 +22,7 @@ pub use entry::{
 };
 pub use episode::{Element, ElementKind, Episode};
 pub use queue::QueueItem;
+pub use relation::{Relation, RelationKind};
 pub use search::{SearchParams, SearchSort};
 pub use service::ServiceId;
 pub use tracking::{

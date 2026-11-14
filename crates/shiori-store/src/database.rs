@@ -5,6 +5,7 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use shiori_core::recognition::{NumberingSequence, SequenceEntry};
 use shiori_core::{
     AgeRating, AiringStatus, Anime, AnimeId, AnimeSettings, AnimeType, Fields, FuzzyDate,
     HistoryItem, ListEntry, ListEntryId, ListStatus, QueueItem, Titles,
@@ -18,6 +19,7 @@ use crate::Result;
 const MIGRATIONS: &[&str] = &[
     include_str!("sql/001_create.sql"),
     include_str!("sql/002_linked_titles.sql"),
+    include_str!("sql/003_numbering.sql"),
 ];
 
 /// Everything loaded at start.
@@ -30,6 +32,8 @@ pub struct Loaded {
     pub history: Vec<HistoryItem>,
     /// Ordered by time.
     pub queue: Vec<QueueItem>,
+    /// Ordered by id.
+    pub numbering: Vec<NumberingSequence>,
 }
 
 /// One open database. Kept open for the lifetime of the app.
@@ -91,6 +95,7 @@ impl Database {
             anime_settings: self.load_anime_settings()?,
             history: self.load_history()?,
             queue: self.load_queue()?,
+            numbering: self.load_numbering()?,
         })
     }
 
@@ -332,6 +337,84 @@ impl Database {
             map.insert(s.id, s);
         }
         Ok(map)
+    }
+
+    // Remembered numbering
+
+    /// Saves a sequence and its entries in one transaction, so a failure
+    /// keeps the old one whole. Returns the sequence's id, new when `id` is
+    /// 0.
+    pub fn save_numbering(&self, sequence: &NumberingSequence) -> Result<i64> {
+        let tx = self.conn.unchecked_transaction()?;
+        let saved = sequence.saved.as_second();
+        let id = if sequence.id == 0 {
+            tx.execute(
+                "INSERT INTO numbering_sequence (root, saved_at) VALUES (?1, ?2)",
+                params![sequence.root.0, saved],
+            )?;
+            tx.last_insert_rowid()
+        } else {
+            tx.execute(
+                "UPDATE numbering_sequence SET root = ?2, saved_at = ?3 WHERE id = ?1",
+                params![sequence.id, sequence.root.0, saved],
+            )?;
+            tx.execute(
+                "DELETE FROM numbering_entry WHERE sequence_id = ?1",
+                [sequence.id],
+            )?;
+            sequence.id
+        };
+        for e in &sequence.entries {
+            tx.execute(
+                "INSERT INTO numbering_entry (sequence_id, anime_id, first, last)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![id, e.anime.0, e.first, e.last],
+            )?;
+        }
+        tx.commit()?;
+        Ok(id)
+    }
+
+    pub fn delete_numbering(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM numbering_sequence WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    fn load_numbering(&self) -> Result<Vec<NumberingSequence>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, root, saved_at FROM numbering_sequence ORDER BY id")?;
+        let mut sequences: Vec<NumberingSequence> = stmt
+            .query_map([], |row| {
+                Ok(NumberingSequence {
+                    id: row.get(0)?,
+                    root: AnimeId(row.get(1)?),
+                    entries: Vec::new(),
+                    saved: Timestamp::from_second(row.get(2)?).unwrap_or_default(),
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut stmt = self.conn.prepare(
+            "SELECT sequence_id, anime_id, first, last FROM numbering_entry ORDER BY first",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                SequenceEntry {
+                    anime: AnimeId(row.get(1)?),
+                    first: row.get(2)?,
+                    last: row.get(3)?,
+                },
+            ))
+        })?;
+        for row in rows {
+            let (id, entry) = row?;
+            if let Some(s) = sequences.iter_mut().find(|s| s.id == id) {
+                s.entries.push(entry);
+            }
+        }
+        Ok(sequences)
     }
 
     // History

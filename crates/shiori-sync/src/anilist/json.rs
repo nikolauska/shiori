@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 use shiori_core::{
     AiringStatus, Anime, AnimeId, AnimeType, Fields, FuzzyDate, ListEntry, ListEntryId, ListStatus,
-    SearchParams, SearchSort, SeasonName,
+    RelationKind, SearchParams, SearchSort, SeasonName,
 };
 
 use crate::ServiceError;
@@ -104,6 +104,66 @@ pub(crate) struct MediaListOptions {
 }
 
 // ---- Media ----------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub(crate) struct RelationsData {
+    #[serde(rename = "Media")]
+    pub media: Option<RelationsMediaJson>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct RelationsMediaJson {
+    relations: Option<RelationsJson>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct RelationsJson {
+    edges: Vec<RelationEdgeJson>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct RelationEdgeJson {
+    relation_type: Option<String>,
+    node: Option<RelatedMediaJson>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct RelatedMediaJson {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    #[serde(flatten)]
+    media: MediaJson,
+}
+
+/// The anime an anime is related to, with how. Manga and other media are
+/// left out: only anime can be in an episode numbering.
+pub(crate) fn to_relations(m: RelationsMediaJson, now: Timestamp) -> Vec<(RelationKind, Anime)> {
+    let edges = m.relations.map(|r| r.edges).unwrap_or_default();
+    edges
+        .into_iter()
+        .filter_map(|edge| {
+            let node = edge.node?;
+            if node.kind.as_deref() != Some("ANIME") {
+                return None;
+            }
+            let kind = match edge.relation_type.as_deref()? {
+                "PREQUEL" => RelationKind::Prequel,
+                "SEQUEL" => RelationKind::Sequel,
+                "SIDE_STORY" => RelationKind::SideStory,
+                "ALTERNATIVE" => RelationKind::Alternative,
+                "SPIN_OFF" => RelationKind::SpinOff,
+                "SUMMARY" => RelationKind::Summary,
+                "PARENT" => RelationKind::Parent,
+                _ => RelationKind::Other,
+            };
+            Some((kind, to_anime(node.media, now)?))
+        })
+        .collect()
+}
 
 #[derive(Deserialize)]
 pub(crate) struct MediaData {

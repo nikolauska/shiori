@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use shiori_core::recognition::{ParseOptions, Relations, TitleIndex, identify, parse, parse_path};
+use shiori_core::recognition::{
+    Numbering, ParseOptions, Relations, TitleIndex, identify, parse, parse_path,
+};
 use shiori_core::{Anime, AnimeId, Episode};
 
 /// A copy of what recognition needs, taken from the app state when a
@@ -12,6 +14,7 @@ pub struct Recognizer {
     pub index: TitleIndex,
     pub anime: BTreeMap<AnimeId, Anime>,
     pub relations: Relations,
+    pub numbering: Numbering,
     pub library_folders: Vec<PathBuf>,
 }
 
@@ -28,7 +31,13 @@ impl Recognizer {
         if !episode.is_video_file() {
             return None;
         }
-        identify(&mut episode, &self.index, &self.anime, &self.relations);
+        identify(
+            &mut episode,
+            &self.index,
+            &self.anime,
+            &self.relations,
+            &self.numbering,
+        );
         Some(episode)
     }
 
@@ -45,6 +54,12 @@ impl Recognizer {
             ..ParseOptions::default()
         };
         let mut episode = parse(&name, options);
-        identify(&mut episode, &self.index, &self.anime, &self.relations)
+        identify(
+            &mut episode,
+            &self.index,
+            &self.anime,
+            &self.relations,
+            &self.numbering,
+        )
     }
 }

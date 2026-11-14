@@ -54,6 +54,7 @@ impl Model {
             index: state.title_index.clone(),
             anime: state.anime.clone(),
             relations: self.tracker.relations.clone(),
+            numbering: state.numbering.clone(),
             library_folders: state.settings.library_folders.clone(),
         }
     }
@@ -68,6 +69,29 @@ impl Model {
             .recognized
             .iter()
             .filter(|(_, e)| title_to_remember(e).is_some_and(|t| normalize(&t) == key))
+            .map(|(path, _)| path.clone())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        let recognizer = self.recognizer();
+        for path in paths {
+            if let Some(episode) = recognizer.file(&path) {
+                self.library.recognized.insert(path, episode);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Recognizes again the library files a numbering change can affect:
+    /// those not recognized, and those recognized through a numbering.
+    pub(super) fn recognize_library_again(&mut self, cx: &mut Context<Self>) {
+        let numbering = &self.state().numbering;
+        let paths: Vec<PathBuf> = self
+            .library
+            .recognized
+            .iter()
+            .filter(|(_, e)| e.anime_id.is_none_or(|id| numbering.of(id).is_some()))
             .map(|(path, _)| path.clone())
             .collect();
         if paths.is_empty() {

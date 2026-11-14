@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::anime::{Anime, AnimeId};
 use crate::episode::{ElementKind, Episode};
 use crate::recognition::index::TitleKind;
-use crate::recognition::{Relations, TitleIndex};
+use crate::recognition::{Numbering, Relations, TitleIndex};
 
 /// Why an episode was matched to its anime, for showing to the user.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,20 +26,45 @@ pub enum MatchReason {
         from: AnimeId,
         from_range: (u32, u32),
     },
+    /// The title matched `from`, whose numbering does not have the episode;
+    /// the user's remembered numbering puts release numbers `from_range` in
+    /// this anime.
+    Numbering {
+        title: String,
+        season: Option<u32>,
+        kind: TitleKind,
+        from: AnimeId,
+        from_range: (u32, u32),
+    },
+    /// The user used a suggested numbering for this playback only: release
+    /// numbers `from_range` of `from` are this anime's.
+    NumberingOnce {
+        from: AnimeId,
+        from_range: (u32, u32),
+    },
     /// The user picked the anime by hand.
     Manual,
 }
 
-/// Finds the anime a parsed episode belongs to. On a relations redirect the
-/// episode's numbers are rewritten to the destination's numbering. Also sets
-/// `episode.anime_id`.
+/// The anime a title matched although its episode number did not fit: the
+/// case an episode numbering suggestion is for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumberMiss {
+    pub anime: AnimeId,
+    pub range: (u32, u32),
+}
+
+/// Finds the anime a parsed episode belongs to. On a remembered numbering
+/// or a relations redirect the episode's numbers are rewritten to the
+/// destination's numbering. Also sets `episode.anime_id`.
 pub fn identify(
     episode: &mut Episode,
     index: &TitleIndex,
     anime: &BTreeMap<AnimeId, Anime>,
     relations: &Relations,
+    numbering: &Numbering,
 ) -> Option<AnimeId> {
-    identify_with_reason(episode, index, anime, relations).map(|(id, _)| id)
+    identify_with_reason(episode, index, anime, relations, numbering).map(|(id, _)| id)
 }
 
 /// `identify`, also saying why the anime was chosen.
@@ -48,10 +73,31 @@ pub fn identify_with_reason(
     index: &TitleIndex,
     anime: &BTreeMap<AnimeId, Anime>,
     relations: &Relations,
+    numbering: &Numbering,
 ) -> Option<(AnimeId, MatchReason)> {
-    let found = find(episode, index, anime, relations);
+    let found = find(episode, index, anime, relations, numbering);
     episode.anime_id = found.as_ref().map(|(id, _)| *id);
     found
+}
+
+/// For an episode `identify` found nothing for: the best anime its title
+/// matched whose known episode count is below the episode number. The
+/// episode is not changed.
+pub fn number_miss(
+    episode: &Episode,
+    index: &TitleIndex,
+    anime: &BTreeMap<AnimeId, Anime>,
+) -> Option<NumberMiss> {
+    if !is_valid_episode_type(episode) {
+        return None;
+    }
+    let range = episode.episode_number_range()?;
+    candidates(episode, index)
+        .into_iter()
+        .find_map(|(id, _, _)| {
+            let count = anime.get(&id)?.episode_count.filter(|&c| c > 0)?;
+            (range.1 > count).then_some(NumberMiss { anime: id, range })
+        })
 }
 
 fn find(
@@ -59,6 +105,7 @@ fn find(
     index: &TitleIndex,
     anime: &BTreeMap<AnimeId, Anime>,
     relations: &Relations,
+    numbering: &Numbering,
 ) -> Option<(AnimeId, MatchReason)> {
     // Openings, endings and previews never count as episodes.
     if !is_valid_episode_type(episode) {
@@ -82,6 +129,30 @@ fn find(
         let Some(range) = episode.episode_number_range() else {
             continue;
         };
+        // A remembered numbering owns its anime: the user confirmed it, so a
+        // number in its gaps is no match rather than falling back to the
+        // relations file.
+        if let Some(sequence) = numbering.of(id) {
+            let fits = |r: &crate::recognition::Resolved| {
+                anime.get(&r.anime).is_some_and(|dest| {
+                    dest.episode_count
+                        .filter(|&c| c > 0)
+                        .is_none_or(|c| r.range.1 <= c)
+                })
+            };
+            if let Some(resolved) = sequence.resolve(range).filter(fits) {
+                episode.set_episode_number_range(resolved.range);
+                let reason = MatchReason::Numbering {
+                    title,
+                    season,
+                    kind,
+                    from: id,
+                    from_range: range,
+                };
+                return Some((resolved.anime, reason));
+            }
+            continue;
+        }
         if let Some(redirect) = relations.find_redirection(id, range) {
             tracing::debug!(
                 "Redirection: {id}:{} -> {}:{}",
@@ -167,6 +238,7 @@ mod tests {
         index: TitleIndex,
         anime: BTreeMap<AnimeId, Anime>,
         relations: Relations,
+        numbering: Numbering,
     }
 
     fn fixture() -> Fixture {
@@ -196,12 +268,13 @@ mod tests {
             index,
             anime,
             relations,
+            numbering: Numbering::default(),
         }
     }
 
     fn run(f: &Fixture, name: &str) -> (Option<u32>, Option<(u32, u32)>) {
         let mut episode = parse(name, ParseOptions::default());
-        let id = identify(&mut episode, &f.index, &f.anime, &f.relations);
+        let id = identify(&mut episode, &f.index, &f.anime, &f.relations, &f.numbering);
         assert_eq!(episode.anime_id, id);
         (id.map(|i| i.0), episode.episode_number_range())
     }
@@ -289,7 +362,8 @@ mod tests {
     fn reason_names_the_title_and_its_kind() {
         let f = fixture();
         let mut episode = parse("[Group] Toradora! - 05.mkv", ParseOptions::default());
-        let found = identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations);
+        let found =
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations, &f.numbering);
         assert_eq!(
             found,
             Some((
@@ -307,7 +381,8 @@ mod tests {
             ParseOptions::default(),
         );
         let (_, reason) =
-            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations).unwrap();
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations, &f.numbering)
+                .unwrap();
         // The season had to be added to find the anime, so the reason says so.
         assert_eq!(
             reason,
@@ -326,7 +401,8 @@ mod tests {
             "[Group] Tensei Shitara Slime Datta Ken - 14 [1080p].mkv",
             ParseOptions::default(),
         );
-        let found = identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations);
+        let found =
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations, &f.numbering);
         assert_eq!(
             found,
             Some((
@@ -350,7 +426,8 @@ mod tests {
         f.index.update(&f.anime[&AnimeId(2)], Some(&settings));
         let mut episode = parse("[Group] Tiger Dragon - 05.mkv", ParseOptions::default());
         let (_, reason) =
-            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations).unwrap();
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations, &f.numbering)
+                .unwrap();
         assert_eq!(
             reason,
             MatchReason::Title {
@@ -359,6 +436,67 @@ mod tests {
                 kind: TitleKind::UserSynonym
             }
         );
+    }
+
+    #[test]
+    fn remembered_numbering_moves_the_episode_and_owns_its_anime() {
+        use crate::recognition::{NumberingSequence, SequenceEntry};
+        let mut f = fixture();
+        // Toradora! (25 episodes) and Kimi no Na wa. as a made-up sequence,
+        // with a gap at 26.
+        f.numbering = Numbering::new(vec![NumberingSequence {
+            id: 1,
+            root: AnimeId(2),
+            entries: vec![
+                SequenceEntry {
+                    anime: AnimeId(2),
+                    first: 1,
+                    last: 25,
+                },
+                SequenceEntry {
+                    anime: AnimeId(1),
+                    first: 27,
+                    last: 27,
+                },
+            ],
+            saved: jiff::Timestamp::UNIX_EPOCH,
+        }]);
+        let mut episode = parse("[Group] Toradora! - 27.mkv", ParseOptions::default());
+        let found =
+            identify_with_reason(&mut episode, &f.index, &f.anime, &f.relations, &f.numbering);
+        assert_eq!(found.as_ref().map(|f| f.0), Some(AnimeId(1)));
+        assert!(matches!(
+            found.unwrap().1,
+            MatchReason::Numbering {
+                from: AnimeId(2),
+                from_range: (27, 27),
+                ..
+            }
+        ));
+        assert_eq!(episode.episode_number_range(), Some((1, 1)));
+        // Numbers that fit stay as they are.
+        assert_eq!(
+            run(&f, "[Group] Toradora! - 05.mkv"),
+            (Some(2), Some((5, 5)))
+        );
+        // The gap is no match.
+        assert_eq!(run(&f, "[Group] Toradora! - 26.mkv").0, None);
+    }
+
+    #[test]
+    fn a_number_above_the_count_is_a_miss_for_the_title() {
+        let f = fixture();
+        let episode = parse("[Group] Toradora! - 30.mkv", ParseOptions::default());
+        assert_eq!(
+            number_miss(&episode, &f.index, &f.anime),
+            Some(NumberMiss {
+                anime: AnimeId(2),
+                range: (30, 30)
+            })
+        );
+        // Unknown counts never make a number too high.
+        let episode = parse("[Group] One Piece - 3000.mkv", ParseOptions::default());
+        assert_eq!(number_miss(&episode, &f.index, &f.anime), None);
     }
 
     #[test]

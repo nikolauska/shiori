@@ -63,12 +63,12 @@ fn schema_is_created_once() {
     let path = dir.path().join("data/anilist.sqlite");
     {
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 2);
+        assert_eq!(db.schema_version().unwrap(), 3);
         db.upsert_anime(&[full_anime(1)]).unwrap();
     }
     // Reopening keeps the data and does not run the migration again.
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), 3);
     assert_eq!(db.load_all().unwrap().anime.len(), 1);
 }
 
@@ -89,7 +89,7 @@ fn a_first_version_file_gains_linked_titles_and_keeps_its_settings() {
         conn.pragma_update(None, "user_version", 1).unwrap();
     }
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), 3);
     let settings = &db.load_all().unwrap().anime_settings[&AnimeId(5)];
     assert_eq!(settings.synonyms, ["One"]);
     assert!(settings.linked.is_empty());
@@ -223,6 +223,42 @@ fn anime_settings_round_trip() {
     };
     db.upsert_anime_settings(&s2).unwrap();
     assert_eq!(db.load_all().unwrap().anime_settings[&AnimeId(5)], s2);
+}
+
+#[test]
+fn numbering_round_trip() {
+    use shiori_core::recognition::{NumberingSequence, SequenceEntry};
+    let db = Database::open_in_memory().unwrap();
+    let entry = |anime, first, last| SequenceEntry {
+        anime: AnimeId(anime),
+        first,
+        last,
+    };
+    let mut s = NumberingSequence {
+        id: 0,
+        root: AnimeId(1),
+        entries: vec![entry(1, 1, 12), entry(2, 13, 24)],
+        saved: ts(100),
+    };
+    s.id = db.save_numbering(&s).unwrap();
+    assert!(s.id > 0);
+    assert_eq!(db.load_all().unwrap().numbering, [s.clone()]);
+    // Saving again replaces the entries.
+    s.entries.push(entry(3, 25, 36));
+    assert_eq!(db.save_numbering(&s).unwrap(), s.id);
+    assert_eq!(db.load_all().unwrap().numbering, [s.clone()]);
+    // An anime can be in one sequence only; the failed save leaves the old
+    // sequence whole.
+    let other = NumberingSequence {
+        id: 0,
+        root: AnimeId(9),
+        entries: vec![entry(9, 1, 1), entry(2, 2, 2)],
+        saved: ts(100),
+    };
+    assert!(db.save_numbering(&other).is_err());
+    assert_eq!(db.load_all().unwrap().numbering, [s.clone()]);
+    db.delete_numbering(s.id).unwrap();
+    assert!(db.load_all().unwrap().numbering.is_empty());
 }
 
 #[test]

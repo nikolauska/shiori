@@ -139,6 +139,7 @@ pub fn identify_media(media: &mut Media, state: &AppState, relations: &Relations
         &state.title_index,
         &state.anime,
         relations,
+        &state.numbering,
     )
     .map(|(_, reason)| reason);
 }

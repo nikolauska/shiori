@@ -46,7 +46,13 @@ fn main() -> ExitCode {
 
     let mut episode = parse_path(Path::new(file_name), &[], ParseOptions::default());
     let title = episode.title().unwrap_or_default().to_owned();
-    match identify(&mut episode, &index, &anime, &relations) {
+    match identify(
+        &mut episode,
+        &index,
+        &anime,
+        &relations,
+        &Default::default(),
+    ) {
         Some(id) => {
             let episodes = match episode.episode_number_range() {
                 Some((a, b)) if b > a => format!("{a}-{b}"),

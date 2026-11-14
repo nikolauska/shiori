@@ -1,7 +1,7 @@
 //! The AniList client against a local server that answers with recorded
 //! responses, to check what is sent and how answers are read.
 
-use shiori_core::{AnimeId, Fields, ListEntry, ListEntryId, ListStatus};
+use shiori_core::{AnimeId, Fields, ListEntry, ListEntryId, ListStatus, RelationKind};
 use shiori_sync::anilist::AniList;
 use shiori_sync::{Account, NetworkConfig, Service, ServiceError};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -149,4 +149,24 @@ async fn save_sends_dirty_fields_and_reads_answer() {
         request.contains(r#""variables":{"mediaId":4224,"progress":3}"#),
         "{request}"
     );
+}
+
+#[tokio::test]
+async fn relations_keep_anime_only_with_their_kind() {
+    let (url, server) = serve_once(200, include_str!("data/anilist/relations.json")).await;
+    let related = client(&url).fetch_relations(AnimeId(1001)).await.unwrap();
+    let found: Vec<(RelationKind, u32, Option<u32>)> = related
+        .iter()
+        .map(|(kind, anime)| (*kind, anime.id.0, anime.episode_count))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (RelationKind::Sequel, 1002, Some(12)),
+            (RelationKind::SideStory, 1004, Some(1)),
+        ]
+    );
+    assert_eq!(related[0].1.titles.romaji, "Example Show 2");
+    let request = server.await.unwrap();
+    assert!(request.contains("relationType"), "{request}");
 }

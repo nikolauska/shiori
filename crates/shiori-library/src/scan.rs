@@ -274,6 +274,7 @@ mod tests {
             index: TitleIndex::build(anime.values(), |_| None),
             anime,
             relations: Relations::parse("", ServiceId::AniList),
+            numbering: Default::default(),
             library_folders: vec![root.to_owned()],
         }
     }

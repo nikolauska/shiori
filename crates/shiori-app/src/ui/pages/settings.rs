@@ -9,21 +9,25 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputState};
 use gpui_component::select::{Select, SelectState};
-use gpui_component::{ActiveTheme as _, IndexPath, WindowExt as _, h_flex, v_flex};
-use shiori_core::{TitleLanguage, UpdateTrigger};
+use gpui_component::{
+    ActiveTheme as _, IndexPath, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
+};
+use shiori_core::{AnimeId, TitleLanguage, UpdateTrigger};
 use shiori_store::{ColorScheme, ProxyKind, Settings, UPDATE_DELAY_RANGE};
 use shiori_sync::anilist;
 
 use crate::ui::model::Model;
 use crate::ui::widgets::Choice;
+use crate::ui::{actions, format, numbering_editor};
 
-const SECTIONS: [&str; 7] = [
+const SECTIONS: [&str; 8] = [
     "Accounts",
     "Library",
     "Application",
     "Media players",
     "Streaming",
     "Anime list update",
+    "Recognition",
     "Advanced",
 ];
 
@@ -329,6 +333,127 @@ impl SettingsView {
         v_flex().gap_1().children(boxes)
     }
 
+    /// The user's recognition corrections: titles linked to anime and
+    /// remembered episode numbering. Unlike the other sections these act at
+    /// once; they are records to look through, not settings to apply.
+    fn recognition(&self, cx: &mut Context<Self>) -> AnyElement {
+        let muted = cx.theme().muted_foreground;
+        let state = self.model.read(cx).state();
+        let mut links: Vec<(String, AnimeId, String)> = state
+            .anime_settings
+            .values()
+            .flat_map(|s| {
+                s.linked
+                    .iter()
+                    .map(move |l| (l.title.clone(), s.id, format::date_label(l.date)))
+            })
+            .collect();
+        links.sort_by_key(|l| l.0.to_lowercase());
+        let sequences = state.numbering.sequences().to_vec();
+        let line = |left: String, right: String| {
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .child(div().truncate().text_sm().child(left))
+                .child(div().truncate().text_xs().text_color(muted).child(right))
+        };
+        let link_rows = links
+            .into_iter()
+            .enumerate()
+            .map(|(ix, (title, id, date))| {
+                let model = self.model.clone();
+                let anime = state.title(id);
+                h_flex()
+                    .gap_2()
+                    .py_1()
+                    .child(line(
+                        format!("\"{title}\" → {anime}"),
+                        format!("Linked {date}"),
+                    ))
+                    .child(
+                        Button::new(("forget-link", ix))
+                            .small()
+                            .ghost()
+                            .label("Forget")
+                            .on_click(move |_, _, cx| {
+                                model.update(cx, |model, cx| model.unlink_title(id, &title, cx))
+                            }),
+                    )
+            });
+        let numbering_rows = sequences.into_iter().map(|s| {
+            let ranges = s
+                .entries
+                .iter()
+                .map(|e| format!("{}: {}-{}", state.title(e.anime), e.first, e.last))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let (edit, forget) = (self.model.clone(), self.model.clone());
+            let sequence = s.clone();
+            h_flex()
+                .gap_2()
+                .py_1()
+                .child(line(state.title(s.root), ranges))
+                .child(
+                    Button::new(("edit-numbering", s.id as usize))
+                        .small()
+                        .label("Edit")
+                        .on_click(move |_, window, cx| {
+                            numbering_editor::open(&edit, sequence.clone(), None, false, window, cx)
+                        }),
+                )
+                .child(
+                    Button::new(("forget-numbering", s.id as usize))
+                        .small()
+                        .ghost()
+                        .label("Forget")
+                        .on_click(move |_, window, cx| {
+                            let model = forget.clone();
+                            let root = model.read(cx).state().title(s.root);
+                            actions::confirm(
+                                "Forget this episode numbering?",
+                                format!(
+                                    "Files of {root} and the anime with it are recognized as before, which may suggest a numbering again. Your list and history stay as they are."
+                                ),
+                                window,
+                                cx,
+                                move |cx| model.update(cx, |model, cx| model.forget_numbering(s.id, cx)),
+                            )
+                        }),
+                )
+        });
+        let empty = |text: &'static str| div().text_sm().text_color(muted).child(text);
+        let link_rows: Vec<_> = link_rows.collect();
+        let numbering_rows: Vec<_> = numbering_rows.collect();
+        v_flex()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child("Corrections you made to recognition. Changes here apply at once."),
+            )
+            .child(div().pt_2().font_semibold().child("Title links"))
+            .when(link_rows.is_empty(), |el| {
+                el.child(empty(
+                    "None yet. Link a file to an anime from \"now playing\" or the Library.",
+                ))
+            })
+            .children(link_rows)
+            .child(
+                div()
+                    .pt_2()
+                    .font_semibold()
+                    .child("Remembered episode numbering"),
+            )
+            .when(numbering_rows.is_empty(), |el| {
+                el.child(empty(
+                    "None yet. Shiori suggests one when an episode number is beyond its season.",
+                ))
+            })
+            .children(numbering_rows)
+            .into_any_element()
+    }
+
     fn render_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let label = |text: &'static str| div().text_color(muted).child(text);
@@ -461,6 +586,7 @@ impl SettingsView {
                     cx,
                 ))
                 .into_any_element(),
+            6 => self.recognition(cx),
             _ => v_flex()
                 .gap_3()
                 .child(label("Proxy type"))

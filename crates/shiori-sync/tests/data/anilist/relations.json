@@ -1,0 +1,41 @@
+{
+  "data": {
+    "Media": {
+      "relations": {
+        "edges": [
+          {
+            "relationType": "SEQUEL",
+            "node": {
+              "type": "ANIME",
+              "id": 1002,
+              "title": { "romaji": "Example Show 2", "english": null, "native": null },
+              "format": "TV",
+              "status": "FINISHED",
+              "episodes": 12,
+              "startDate": { "year": 2025, "month": 4, "day": 1 }
+            }
+          },
+          {
+            "relationType": "SIDE_STORY",
+            "node": {
+              "type": "ANIME",
+              "id": 1004,
+              "title": { "romaji": "Example Show: Beach Episode" },
+              "format": "OVA",
+              "episodes": 1
+            }
+          },
+          {
+            "relationType": "ADAPTATION",
+            "node": {
+              "type": "MANGA",
+              "id": 9001,
+              "title": { "romaji": "Example Show (manga)" },
+              "format": "MANGA"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

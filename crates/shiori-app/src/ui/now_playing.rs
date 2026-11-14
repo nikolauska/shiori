@@ -9,13 +9,16 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, Sizable as _, StyledExt as _, h_flex, v_flex};
 use shiori_core::entry::is_in_list;
-use shiori_core::recognition::{MatchReason, TitleKind};
+use shiori_core::recognition::{
+    MatchReason, NumberingSequence, Proposal, ReviewReason, SequenceEntry, TitleKind,
+};
 use shiori_core::{AnimeId, ElementKind, Phase, Reason};
 
 use shiori_app::tracking::{Media, Source, update_settings};
 
 use super::model::Model;
-use super::{link_picker, poster, style};
+use super::numbering::SuggestionState;
+use super::{link_picker, numbering_editor, poster, style};
 
 /// The anime the playing media is identified as, if any.
 pub fn playing_anime(model: &Model) -> Option<AnimeId> {
@@ -227,13 +230,27 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
                 Some(n) => format!("{parsed} · episode {n}"),
                 None => parsed.to_owned(),
             };
+            // With a numbering suggestion the reason it is not recognized
+            // is known, and says more than "Not recognized".
+            let why = match &m.tracker.suggestion {
+                Some(suggestion) => {
+                    let state = m.state();
+                    let count = state
+                        .anime
+                        .get(&suggestion.miss.anime)
+                        .and_then(|a| a.episode_count)
+                        .unwrap_or_default();
+                    format!(
+                        "Episode {} is beyond {}'s {count}",
+                        suggestion.miss.range.1,
+                        state.title(suggestion.miss.anime)
+                    )
+                }
+                None => "Not recognized".to_owned(),
+            };
             (
                 title.into(),
-                format!(
-                    "Not recognized · {} · {}",
-                    media.player,
-                    source_label(&media)
-                ),
+                format!("{why} · {} · {}", media.player, source_label(&media)),
             )
         }
     };
@@ -336,6 +353,23 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
             })
     };
 
+    // The title matched but the number is above the anime's count: the
+    // numbering suggestion is the one problem shown, instead of chips.
+    if id.is_none()
+        && let Some(numbering) = numbering_controls(model, cx)
+    {
+        return Some(
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_3()
+                .child(what)
+                .child(numbering)
+                .child(link.ghost())
+                .into_any_element(),
+        );
+    }
+
     Some(
         h_flex()
             .flex_1()
@@ -353,9 +387,141 @@ pub fn view(model: &Entity<Model>, cx: &mut App) -> Option<AnyElement> {
     )
 }
 
+/// The bar's part for an episode numbering suggestion: the question and its
+/// answers (ui.md, "Episode numbering").
+fn numbering_controls(model: &Entity<Model>, cx: &App) -> Option<AnyElement> {
+    let m = model.read(cx);
+    let suggestion = m.tracker.suggestion.clone()?;
+    let state = m.state();
+    let miss = &suggestion.miss;
+    let number = miss.range.1;
+    let count = state
+        .anime
+        .get(&miss.anime)
+        .and_then(|a| a.episode_count)
+        .unwrap_or_default();
+    let warning = cx.theme().warning;
+    let muted = cx.theme().muted_foreground;
+    // What the editor opens with when there is no suggestion to show.
+    let fallback = state
+        .numbering
+        .of(miss.anime)
+        .cloned()
+        .unwrap_or(NumberingSequence {
+            id: 0,
+            root: miss.anime,
+            entries: vec![SequenceEntry {
+                anime: miss.anime,
+                first: 1,
+                last: count.max(1),
+            }],
+            saved: jiff::Timestamp::UNIX_EPOCH,
+        });
+    let (question, draft, usable) = match &suggestion.state {
+        SuggestionState::Loading => ("Checking related seasons…".to_owned(), None, None),
+        SuggestionState::Failed(error) => (
+            format!("Could not check related seasons: {error}"),
+            Some(fallback),
+            None,
+        ),
+        SuggestionState::Ready(Proposal::Use { sequence, resolved }) => (
+            format!(
+                "Is it {}, episode {}?",
+                state.title(resolved.anime),
+                resolved.range.0
+            ),
+            Some(sequence.clone()),
+            Some(sequence.clone()),
+        ),
+        SuggestionState::Ready(Proposal::Review { draft, reason }) => (
+            match reason {
+                ReviewReason::Branch => {
+                    "Its seasons branch on AniList; pick which belong.".to_owned()
+                }
+                ReviewReason::UnknownCount(id) => {
+                    format!("{}'s episode count is unknown.", state.title(*id))
+                }
+                ReviewReason::NoFit => "No season has that number.".to_owned(),
+                ReviewReason::Ambiguous => {
+                    "Count from the first season or from this one?".to_owned()
+                }
+            },
+            Some(draft.clone()),
+            None,
+        ),
+    };
+    let preview = (miss.anime, number);
+    let review = draft.map(|draft| {
+        let model = model.clone();
+        Button::new("review-numbering")
+            .xsmall()
+            .when(usable.is_none(), |b| b.primary())
+            .when(usable.is_some(), |b| b.ghost())
+            .label("Review…")
+            .tooltip("Open the episode numbering")
+            .on_click(move |_, window, cx| {
+                numbering_editor::open(&model, draft.clone(), Some(preview), true, window, cx)
+            })
+    });
+    let answers = usable.map(|sequence| {
+        let remember = {
+            let model = model.clone();
+            let sequence = sequence.clone();
+            Button::new("use-remember")
+                .xsmall()
+                .primary()
+                .label("Use and remember")
+                .on_click(move |_, _, cx| {
+                    model.update(cx, |model, cx| {
+                        if let Err(error) = model.save_numbering(sequence.clone(), cx) {
+                            model.set_error(format!("Could not save the numbering: {error}"), cx);
+                        }
+                    })
+                })
+        };
+        let once = {
+            let model = model.clone();
+            Button::new("use-once")
+                .xsmall()
+                .ghost()
+                .label("Use once")
+                .on_click(move |_, _, cx| {
+                    model.update(cx, |model, cx| model.use_numbering_once(&sequence, cx))
+                })
+        };
+        [remember, once]
+    });
+    let dismiss = {
+        let model = model.clone();
+        Button::new("dismiss-numbering")
+            .xsmall()
+            .ghost()
+            .label("Dismiss")
+            .on_click(move |_, _, cx| model.update(cx, |model, cx| model.dismiss_suggestion(cx)))
+    };
+    let attention = !matches!(suggestion.state, SuggestionState::Loading);
+    Some(
+        h_flex()
+            .flex_none()
+            .max_w(px(640.))
+            .gap_2()
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(if attention { warning } else { muted })
+                    .child(question),
+            )
+            .children(answers.into_iter().flatten())
+            .children(review)
+            .child(dismiss)
+            .into_any_element(),
+    )
+}
+
 /// Why the media matched the anime, as a sentence.
 fn matched_because(model: &Model, source: &Source, reason: &MatchReason) -> String {
-    let from = match source {
+    let origin = match source {
         Source::File(_) => "file name",
         Source::Title(_) => "window title",
     };
@@ -373,15 +539,15 @@ fn matched_because(model: &Model, source: &Source, reason: &MatchReason) -> Stri
         } => {
             let file = quoted(title, *season);
             match kind {
-                TitleKind::MainTitle => format!("The {from}'s {file} matches its title."),
+                TitleKind::MainTitle => format!("The {origin}'s {file} matches its title."),
                 TitleKind::UserSynonym => format!(
-                    "The {from}'s {file} is one of your alternative titles for it (Settings tab)."
+                    "The {origin}'s {file} is one of your alternative titles for it (Settings tab)."
                 ),
                 TitleKind::TitleWithYear => {
-                    format!("The {from}'s {file} matches its title with the start year.")
+                    format!("The {origin}'s {file} matches its title with the start year.")
                 }
                 TitleKind::ServiceSynonym => format!(
-                    "The {from}'s {file} matches another title {} lists for it.",
+                    "The {origin}'s {file} matches another title {} lists for it.",
                     model.service_name()
                 ),
             }
@@ -399,12 +565,37 @@ fn matched_because(model: &Model, source: &Source, reason: &MatchReason) -> Stri
                 format!("episode {last}")
             };
             format!(
-                "The {from}'s {} matches {}, which has no {number}. The anime relations file moves it to this anime.",
+                "The {origin}'s {} matches {}, which has no {number}. The anime relations file moves it to this anime.",
                 quoted(title, *season),
                 model.state().title(*from)
             )
         }
-        MatchReason::Manual => "You picked it with Set as now playing.".into(),
+        MatchReason::Numbering {
+            title,
+            season,
+            from,
+            from_range: (first, last),
+            ..
+        } => {
+            let number = if last > first {
+                format!("{first}-{last}")
+            } else {
+                last.to_string()
+            };
+            format!(
+                "The {origin}'s {} matches {}, and your remembered numbering puts number {number} in this anime.",
+                quoted(title, *season),
+                model.state().title(*from)
+            )
+        }
+        MatchReason::NumberingOnce {
+            from,
+            from_range: (_, last),
+        } => format!(
+            "You used the suggested numbering for this playback: number {last} of {} is this anime's.",
+            model.state().title(*from)
+        ),
+        MatchReason::Manual => "You picked it by hand.".into(),
     }
 }
 

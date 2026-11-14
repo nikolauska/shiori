@@ -7,14 +7,14 @@ use jiff::Timestamp;
 use reqwest::header::{AUTHORIZATION, SERVER};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use shiori_core::{Anime, AnimeId, Fields, ListEntry, SearchParams, ServiceId};
+use shiori_core::{Anime, AnimeId, Fields, ListEntry, RelationKind, SearchParams, ServiceId};
 
 use crate::{
     Account, AccountInfo, FetchedList, PageToken, SavedEntry, SearchPage, Service, ServiceError,
 };
 use json::{
-    CollectionData, DeleteData, MediaData, PageData, SaveData, ViewerData, decode, save_variables,
-    search_variables, to_anime, to_entry,
+    CollectionData, DeleteData, MediaData, PageData, RelationsData, SaveData, ViewerData, decode,
+    save_variables, search_variables, to_anime, to_entry, to_relations,
 };
 
 /// Shiori's API client, registered at <https://anilist.co/settings/developer>.
@@ -101,6 +101,30 @@ impl AniList {
             }
         }
         decode(status, server.as_deref(), &bytes, fallback)
+    }
+}
+
+impl AniList {
+    /// The anime related to `id`, with the related anime's details. Only
+    /// AniList has relations Shiori uses, so this is not on `Service`.
+    pub async fn fetch_relations(
+        &self,
+        id: AnimeId,
+    ) -> Result<Vec<(RelationKind, Anime)>, ServiceError> {
+        const FALLBACK: &str = "Could not parse related anime.";
+        let data: RelationsData = self
+            .request(
+                include_str!("queries/media_relations.graphql"),
+                json!({ "id": id.0 }),
+                None,
+                FALLBACK,
+                None,
+            )
+            .await?;
+        let media = data
+            .media
+            .ok_or_else(|| ServiceError::Parse(FALLBACK.to_owned()))?;
+        Ok(to_relations(media, Timestamp::now()))
     }
 }
 
