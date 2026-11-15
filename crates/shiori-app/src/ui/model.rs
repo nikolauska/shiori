@@ -422,11 +422,14 @@ impl Model {
                     let result = this.startup.state.store_anime(page.anime);
                     this.apply(result, cx);
                     this.set_status(format!("Found {} anime.", ids.len()), cx);
-                    done(Some((ids, page.next)), cx);
+                    // Deferred because the model is still being updated
+                    // here, and callers read it back to show the results;
+                    // reading it now panics with a double lease.
+                    cx.defer(move |cx| done(Some((ids, page.next)), cx));
                 }
                 Err(error) => {
                     this.service_error(error, cx);
-                    done(None, cx);
+                    cx.defer(move |cx| done(None, cx));
                 }
             },
         );
