@@ -542,6 +542,7 @@ impl AnimeView {
             .map_or("?".to_owned(), |n| n.to_string());
         let progress = match entry.filter(|_| in_list) {
             Some(e) => format!("{} / {total}", e.watched_episodes),
+            None if total == "1" => "1 episode".to_owned(),
             None => format!("{total} episodes"),
         };
         let length = anime
@@ -778,12 +779,16 @@ impl AnimeView {
 /// The Sort menu button for a view's page header.
 pub fn sort_menu(view: &Entity<AnimeView>, cx: &App) -> impl IntoElement + use<> {
     let sort = view.read(cx).sort(cx);
-    let label = sort.primary.map_or("Sort", |key| key.column.name());
+    // Without a chosen column the rows keep the order they came in (for
+    // search, AniList's relevance), so there is no column to name.
+    let label = sort.primary.map_or("Sort".to_owned(), |key| {
+        format!("Sort: {}", key.column.name())
+    });
     let view = view.downgrade();
     Button::new("sort")
         .small()
         .ghost()
-        .label(format!("Sort: {label}"))
+        .label(label)
         .dropdown_menu(move |mut menu, _, _| {
             for column in ListColumn::SORTS {
                 let view = view.clone();

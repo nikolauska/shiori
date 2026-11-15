@@ -297,30 +297,36 @@ impl Render for SearchPage {
                             .loading(self.searching)
                             .on_click(cx.listener(|this, _, window, cx| this.run(window, cx))),
                     )
+                    // One group, so a narrow window wraps the season
+                    // buttons together instead of leaving one alone.
                     .child(
-                        Button::new("previous-season")
-                            .icon(IconName::ChevronLeft)
-                            .ghost()
-                            .tooltip("Previous season")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.browse(-1, window, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("this-season")
-                            .ghost()
-                            .label("This season")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.browse(0, window, cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("next-season")
-                            .icon(IconName::ChevronRight)
-                            .ghost()
-                            .tooltip("Next season")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.browse(1, window, cx)),
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Button::new("previous-season")
+                                    .icon(IconName::ChevronLeft)
+                                    .ghost()
+                                    .tooltip("Previous season")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.browse(-1, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("this-season")
+                                    .ghost()
+                                    .label("This season")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.browse(0, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("next-season")
+                                    .icon(IconName::ChevronRight)
+                                    .ghost()
+                                    .tooltip("Next season")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.browse(1, window, cx)
+                                    })),
                             ),
                     ),
             )
