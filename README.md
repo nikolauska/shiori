@@ -1,8 +1,16 @@
+<div align="center">
+
+<img src="assets/icon.png" alt="Shiori's icon, a bookmark" width="96">
+
 # Shiori
 
 **Watch anime. Your list keeps up by itself.**
 
+*Shiori (栞) is Japanese for "bookmark": it keeps your place in every show you watch.*
+
 Shiori is a desktop app for Windows and Linux that notices which anime episode you are playing, works out the series and episode from the file name, and updates your list for you. No more pausing the episode to open a browser tab and bump a counter from 6 to 7.
+
+</div>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/list-dark.png">
