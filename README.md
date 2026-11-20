@@ -49,10 +49,30 @@ Shiori follows your system theme, or you can pick light or dark in Settings.
 Shiori is not released yet. It works day to day, but some things are still missing:
 
 - **List services:** AniList works today. MyAnimeList and Kitsu are planned for the first release.
-- **Installers:** there are no installers or packages yet, so for now you build Shiori from source (below).
+- **Installers:** there are no installers or distribution packages yet. The downloads below are the program in an archive.
 - **macOS:** not supported.
 
 The full plan is in [docs/roadmap.md](docs/roadmap.md).
+
+## Download
+
+Get the latest version from the [releases page](../../releases/latest).
+
+**Windows:** download `shiori-<version>-windows-x86_64.zip`, unpack it anywhere and run `shiori.exe`.
+
+**Linux:** download `shiori-<version>-linux-x86_64.tar.gz` and unpack it. Shiori needs GTK 3, Vulkan (it draws with the graphics card), xkbcommon and the Ayatana AppIndicator library for the tray icon. Most desktops already have them. On Debian and Ubuntu:
+
+```sh
+sudo apt-get install libgtk-3-0 libvulkan1 libxkbcommon-x11-0 libayatana-appindicator3-1
+```
+
+Then run `./shiori` from the unpacked folder. To add Shiori to your app menu, copy the files into place:
+
+```sh
+install -Dm755 shiori ~/.local/bin/shiori
+install -Dm644 shiori.png ~/.local/share/icons/hicolor/1024x1024/apps/shiori.png
+install -Dm644 shiori.desktop ~/.local/share/applications/shiori.desktop
+```
 
 ## Building from source
 

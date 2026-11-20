@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Shiori
+GenericName=Anime Tracker
+Comment=Updates your anime list when you watch an episode
+Exec=shiori
+Icon=shiori
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=anime;anilist;tracker;
+StartupWMClass=shiori
