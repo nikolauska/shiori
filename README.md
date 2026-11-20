@@ -46,13 +46,11 @@ Shiori follows your system theme, or you can pick light or dark in Settings.
 
 ## Status
 
-Shiori is not released yet. It works day to day, but some things are still missing:
+Shiori is in early releases. It works day to day, but some things are still missing:
 
-- **List services:** AniList works today. MyAnimeList and Kitsu are planned for the first release.
+- **List services:** only AniList is supported. MyAnimeList and Kitsu are planned for a later version.
 - **Installers:** there are no installers or distribution packages yet. The downloads below are the program in an archive.
 - **macOS:** not supported.
-
-The full plan is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Download
 
@@ -100,8 +98,7 @@ To try Shiori without touching your real data, set `SHIORI_HOME` to an empty fol
 
 ## Documentation
 
-- [Product handbook](docs/domain.md): what Shiori does, from the user's point of view.
-- [Implementation documents](docs/README.md): how it is built, crate by crate.
+The [product handbook](docs/domain.md) explains what Shiori does, from the user's point of view.
 
 ## Thanks to Taiga
 
