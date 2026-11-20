@@ -311,7 +311,7 @@ async fn set(args: &[String]) -> Result<ExitCode> {
     if entry.status == ListStatus::NotInList {
         entry.status = ListStatus::Watching;
     }
-    let events = state.save_entry(entry, Timestamp::now())?;
+    let events = state.edit_entry(entry, Timestamp::now())?;
     sync_and_save(&mut context, &events).await
 }
 

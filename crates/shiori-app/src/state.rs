@@ -159,6 +159,34 @@ impl AppState {
         Ok(events)
     }
 
+    /// Stores a change the user made, by hand or by playing an episode. Like
+    /// `save_entry`, but an episode count that went up is added to history.
+    /// Imports and uploads use `save_entry`, because copying a list is not
+    /// watching it and would bury real history under hundreds of rows.
+    pub fn edit_entry(&mut self, entry: ListEntry, now: Timestamp) -> Result<Vec<AppEvent>> {
+        let id = entry.anime_id;
+        let episode = entry.watched_episodes;
+        // An entry waiting to be deleted is gone as far as the user knows,
+        // so adding it back counts from zero.
+        let before = self
+            .entries
+            .get(&id)
+            .filter(|e| !e.pending_delete)
+            .map_or(0, |e| e.watched_episodes);
+        let mut events = self.save_entry(entry, now)?;
+        if episode > before {
+            let history_id = self.db.add_history(id, episode, now)?;
+            self.history.push(HistoryItem {
+                id: history_id,
+                anime_id: id,
+                episode,
+                time: now,
+            });
+            events.push(AppEvent::HistoryChanged);
+        }
+        Ok(events)
+    }
+
     /// Marks an entry for deletion; it disappears locally once the service
     /// confirms.
     pub fn remove_entry(&mut self, id: AnimeId, now: Timestamp) -> Result<Vec<AppEvent>> {
@@ -496,6 +524,31 @@ mod tests {
         state.clear_history().unwrap();
         assert!(state.history.is_empty());
         assert!(state.stored().history.is_empty());
+    }
+
+    #[test]
+    fn edits_that_watch_more_episodes_are_added_to_history() {
+        let mut state = state();
+        state.store_anime(vec![Anime::new(AnimeId(1))]).unwrap();
+        let mut entry = ListEntry::new(AnimeId(1));
+        entry.status = shiori_core::ListStatus::Watching;
+        entry.watched_episodes = 2;
+        let events = state
+            .edit_entry(entry.clone(), Timestamp::UNIX_EPOCH)
+            .unwrap();
+        assert!(events.contains(&AppEvent::HistoryChanged));
+        // Going back an episode is a correction, not watching.
+        entry.watched_episodes = 1;
+        let events = state
+            .edit_entry(entry.clone(), Timestamp::UNIX_EPOCH)
+            .unwrap();
+        assert!(!events.contains(&AppEvent::HistoryChanged));
+        // Plain saves are imports and uploads.
+        entry.watched_episodes = 5;
+        state.save_entry(entry, Timestamp::UNIX_EPOCH).unwrap();
+        let episodes: Vec<u32> = state.stored().history.iter().map(|h| h.episode).collect();
+        assert_eq!(episodes, [2]);
+        assert_eq!(state.history.len(), 1);
     }
 
     #[test]

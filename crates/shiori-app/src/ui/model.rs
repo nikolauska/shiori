@@ -222,7 +222,8 @@ impl Model {
     // ---- Edits ------------------------------------------------------------
 
     pub fn save_entry(&mut self, entry: ListEntry, cx: &mut Context<Self>) {
-        let result = self.startup.state.save_entry(entry, Timestamp::now());
+        // Every save from the UI is the user's own edit or the tracker's.
+        let result = self.startup.state.edit_entry(entry, Timestamp::now());
         self.apply(result, cx);
         self.queue_settled(cx);
     }
