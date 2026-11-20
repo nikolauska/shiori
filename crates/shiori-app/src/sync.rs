@@ -319,10 +319,8 @@ mod tests {
 
     #[tokio::test]
     async fn queued_edit_survives_a_restart() {
-        let dir = std::env::temp_dir().join(format!("shiori-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("anilist.sqlite");
-        let _ = std::fs::remove_file(&path);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("anilist.sqlite");
         {
             let mut state = AppState::new(
                 Database::open(&path).unwrap(),
@@ -346,7 +344,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(service.calls(), ["authenticate", "save 7", "fetch_list"]);
-        std::fs::remove_dir_all(&dir).unwrap();
+        // Windows refuses to delete a file that is still open, so the
+        // database has to be closed before the folder is removed.
+        drop(state);
+        dir.close().unwrap();
     }
 
     #[tokio::test]
