@@ -103,6 +103,43 @@ pub fn merge(
     Ok((merged, events))
 }
 
+/// The local list in MyAnimeList's ids, for uploading to a MyAnimeList
+/// account (decision I38). The local list uses AniList ids; each anime's
+/// `mal_id` gives its MyAnimeList id. Entries whose anime has none cannot
+/// be uploaded; their titles are returned so the user can be told.
+pub fn to_mal_ids(
+    anime: &BTreeMap<AnimeId, Anime>,
+    entries: impl IntoIterator<Item = ListEntry>,
+) -> (BTreeMap<AnimeId, Anime>, Vec<ListEntry>, Vec<String>) {
+    let mut mapped_anime = BTreeMap::new();
+    let mut mapped = Vec::new();
+    let mut skipped = Vec::new();
+    for entry in entries.into_iter().filter(|e| is_in_list(Some(e))) {
+        let Some(local) = anime.get(&entry.anime_id) else {
+            continue;
+        };
+        let Some(mal_id) = local.mal_id else {
+            skipped.push(local.titles.romaji.clone());
+            continue;
+        };
+        let id = AnimeId(mal_id);
+        // Stored only when the account lacks the anime; the next list fetch
+        // replaces it with MyAnimeList's own data.
+        mapped_anime.insert(
+            id,
+            Anime {
+                id,
+                ..local.clone()
+            },
+        );
+        mapped.push(ListEntry {
+            anime_id: id,
+            ..entry
+        });
+    }
+    (mapped_anime, mapped, skipped)
+}
+
 #[cfg(test)]
 mod tests {
     use shiori_core::ListEntryId;
@@ -183,5 +220,29 @@ mod tests {
         assert!(state.queue.contains(AnimeId(2)));
         assert!(state.queue.contains(AnimeId(4)));
         assert!(!state.queue.contains(AnimeId(1)));
+    }
+
+    #[test]
+    fn local_list_in_mal_ids() {
+        let mut with_mal = Anime::new(AnimeId(154587));
+        with_mal.mal_id = Some(52991);
+        with_mal.titles.romaji = "Sousou no Frieren".into();
+        let mut without = Anime::new(AnimeId(7));
+        without.titles.romaji = "Only on AniList".into();
+        let anime = BTreeMap::from([(with_mal.id, with_mal), (without.id, without)]);
+        let entries = vec![
+            entry(154587, ListStatus::Watching, 3),
+            entry(7, ListStatus::Completed, 12),
+            entry(8, ListStatus::NotInList, 0),
+        ];
+        let (mapped_anime, mapped, skipped) = to_mal_ids(&anime, entries);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].anime_id, AnimeId(52991));
+        assert_eq!(mapped[0].watched_episodes, 3);
+        assert_eq!(
+            mapped_anime[&AnimeId(52991)].titles.romaji,
+            "Sousou no Frieren"
+        );
+        assert_eq!(skipped, ["Only on AniList"]);
     }
 }

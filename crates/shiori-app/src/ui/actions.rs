@@ -17,7 +17,8 @@ use shiori_core::anime::MAX_EPISODE_COUNT;
 use shiori_core::entry::is_in_list;
 use shiori_core::{Anime, AnimeId, FuzzyDate, ListEntry, ListStatus};
 use shiori_library::{can_start_rewatch, last_episode, next_episode, random_episode_limit};
-use shiori_sync::anilist::score::rating_list;
+
+use shiori_app::service::anime_page_url;
 
 use super::library::PlayChoice;
 use super::model::Model;
@@ -85,6 +86,7 @@ pub fn context_menu(
         return menu;
     };
     let state = model.read(cx).state();
+    let catalog = state.catalog_service();
     let single = ids.len() == 1;
     let in_list: Vec<AnimeId> = ids
         .iter()
@@ -94,7 +96,7 @@ pub fn context_menu(
     let entry = state.entries.get(&id).cloned();
     let episodes = state.anime.get(&id).and_then(|a| a.episode_count);
     let titles: Vec<String> = ids.iter().map(|&id| state.title(id)).collect();
-    let ratings = rating_list(format::score_format(state));
+    let ratings = format::ratings(state);
     // Check marks only make sense when every selected entry agrees.
     let current = |value: fn(&ListEntry) -> u8| {
         let mut values = in_list
@@ -152,7 +154,7 @@ pub fn context_menu(
         .separator()
         .item(item(
             "Links",
-            Rc::new(move |_, cx| cx.open_url(&format!("https://anilist.co/anime/{id}"))),
+            Rc::new(move |_, cx| cx.open_url(&anime_page_url(catalog, id))),
         ))
         .item(PopupMenuItem::submenu(
             "Search",

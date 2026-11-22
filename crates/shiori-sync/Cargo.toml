@@ -7,6 +7,9 @@ rust-version.workspace = true
 
 [dependencies]
 shiori-core.workspace = true
+# Makes the PKCE verifier and state for MyAnimeList sign-in; already in
+# the workspace for the app.
+fastrand.workspace = true
 jiff.workspace = true
 reqwest.workspace = true
 serde.workspace = true

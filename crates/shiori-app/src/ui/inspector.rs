@@ -24,10 +24,12 @@ use jiff::Timestamp;
 use shiori_core::anime::{MAX_EPISODE_COUNT, is_stale};
 use shiori_core::entry::is_in_list;
 use shiori_core::recognition::normalize;
-use shiori_core::{AnimeId, AnimeSettings, FuzzyDate, ListEntry, ListStatus};
+use shiori_core::{AnimeId, AnimeSettings, FuzzyDate, ListEntry, ListStatus, ServiceId};
 use std::time::Duration;
 
 use shiori_sync::anilist::score::{ScoreFormat, rating_list};
+
+use shiori_app::service::anime_page_url;
 
 use shiori_app::list_view::{airing_label, new_episodes};
 use shiori_app::state::AppEvent;
@@ -127,7 +129,7 @@ impl Inspector {
         let text = |placeholder: &'static str, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
-        let ratings: Vec<Choice<u8>> = rating_list(format::score_format(model.read(cx).state()))
+        let ratings: Vec<Choice<u8>> = format::ratings(model.read(cx).state())
             .into_iter()
             .map(|r| {
                 Choice::new(
@@ -629,7 +631,11 @@ impl Inspector {
     }
 
     fn score_control(&self, score: u8, cx: &mut Context<Self>) -> AnyElement {
-        let format = format::score_format(self.model.read(cx).state());
+        let state = self.model.read(cx).state();
+        let format = format::score_format(state);
+        // MyAnimeList users know its scores by name, "(8) Very Good".
+        let named = state.catalog_service() == ServiceId::MyAnimeList;
+        let named_label = format::score_label(state, score);
         let Some(steps) = star_scores(format) else {
             return div()
                 .w_32()
@@ -643,6 +649,8 @@ impl Inspector {
         // Empty stars already say "no score".
         let label = if score == 0 {
             String::new()
+        } else if named {
+            named_label
         } else {
             format!("{lit}/{max}")
         };
@@ -689,6 +697,7 @@ impl Inspector {
             .anime
             .get(&id)
             .and_then(|a| a.episode_count);
+        let catalog = self.model.read(cx).state().catalog_service();
         let muted = cx.theme().muted_foreground;
         let stepper =
             v_flex()
@@ -798,15 +807,13 @@ impl Inspector {
                             })
                     })
                     .child(
-                        Button::new("anilist")
+                        Button::new("service-page")
                             .small()
                             .ghost()
                             .icon(IconName::ExternalLink)
-                            .label("AniList")
-                            .tooltip("Open on AniList")
-                            .on_click(move |_, _, cx| {
-                                cx.open_url(&format!("https://anilist.co/anime/{id}"))
-                            }),
+                            .label(catalog.name())
+                            .tooltip(format!("Open on {}", catalog.name()))
+                            .on_click(move |_, _, cx| cx.open_url(&anime_page_url(catalog, id))),
                     )
                     .child(div().flex_1())
                     .children(saved),

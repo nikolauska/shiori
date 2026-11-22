@@ -113,6 +113,16 @@ impl AppState {
         self.settings.list == Some(ListLocation::Local)
     }
 
+    /// The service whose ids and anime data the list uses: AniList for a list
+    /// on this computer, otherwise the account's service.
+    pub fn catalog_service(&self) -> ServiceId {
+        if self.is_local() {
+            ServiceId::AniList
+        } else {
+            self.service
+        }
+    }
+
     /// The title to show, or the id when the anime is not known yet.
     pub fn title(&self, id: AnimeId) -> String {
         match self.anime.get(&id) {

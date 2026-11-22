@@ -10,6 +10,7 @@ mod link_picker;
 mod list_location;
 mod list_transfer;
 mod main_window;
+mod mal_sign_in;
 mod model;
 mod now_playing;
 mod numbering;

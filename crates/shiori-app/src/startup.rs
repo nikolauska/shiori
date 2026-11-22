@@ -9,8 +9,9 @@ use shiori_store::{
     Accounts, Database, Folders, ListLocation, SecretKey, Secrets, Settings, SettingsFile,
 };
 use shiori_sync::anilist::AniList;
-use shiori_sync::{Account, NetworkConfig, ProxyConfig, ProxyKind};
+use shiori_sync::{Account, NetworkConfig, ProxyConfig, ProxyKind, Tokens};
 
+use crate::service::ActiveService;
 use crate::state::AppState;
 
 /// The folders in use: under `SHIORI_HOME` when it is set, the standard
@@ -47,9 +48,9 @@ impl Context {
         let folders = folders()?;
         folders.create_all()?;
         let (settings_file, settings) = SettingsFile::load(&folders.settings_file())?;
-        if settings.service != ServiceId::AniList {
+        if settings.service == ServiceId::Kitsu {
             bail!(
-                "{} is not supported yet; set sync.service to \"anilist\"",
+                "{} is not supported yet; set sync.service to \"anilist\" or \"myanimelist\"",
                 settings.service.name()
             );
         }
@@ -102,15 +103,78 @@ impl Context {
         })
     }
 
-    pub fn service(&self) -> Result<AniList> {
+    /// The service the account and its list are on.
+    pub fn service(&self) -> Result<ActiveService> {
+        Ok(ActiveService::new(
+            self.state.service,
+            self.network()?.client()?,
+        ))
+    }
+
+    /// AniList, for what only it offers: relations, airing times, and the
+    /// anime data of a list kept on this computer, which uses AniList ids.
+    pub fn anilist(&self) -> Result<AniList> {
         Ok(AniList::new(self.network()?.client()?))
     }
 
+    /// Where anime data comes from: AniList for a list on this computer,
+    /// otherwise the account's service, whose ids the list uses.
+    pub fn catalog(&self) -> Result<ActiveService> {
+        if self.state.is_local() {
+            Ok(ActiveService::AniList(self.anilist()?))
+        } else {
+            self.service()
+        }
+    }
+
     pub fn account(&self) -> Result<Account> {
-        Ok(Account {
-            username: self.state.accounts.anilist.username.clone(),
-            token: self.secrets.get(SecretKey::AniListToken)?,
+        let accounts = &self.state.accounts;
+        Ok(match self.state.service {
+            ServiceId::MyAnimeList => Account {
+                username: accounts.myanimelist.username.clone(),
+                token: self.secrets.get(SecretKey::MyAnimeListAccessToken)?,
+                refresh_token: self.secrets.get(SecretKey::MyAnimeListRefreshToken)?,
+            },
+            ServiceId::AniList | ServiceId::Kitsu => Account {
+                username: accounts.anilist.username.clone(),
+                token: self.secrets.get(SecretKey::AniListToken)?,
+                refresh_token: None,
+            },
         })
+    }
+
+    /// Stores tokens from signing in or from a refresh. Only MyAnimeList
+    /// hands out refresh tokens.
+    pub fn store_tokens(&self, tokens: &Tokens) -> Result<()> {
+        self.secrets
+            .set(SecretKey::MyAnimeListAccessToken, &tokens.access)?;
+        self.secrets
+            .set(SecretKey::MyAnimeListRefreshToken, &tokens.refresh)?;
+        Ok(())
+    }
+
+    /// A sign-in for `service` is stored, whether or not it still works.
+    pub fn has_token(&self, service: ServiceId) -> bool {
+        let key = match service {
+            ServiceId::MyAnimeList => SecretKey::MyAnimeListRefreshToken,
+            ServiceId::AniList | ServiceId::Kitsu => SecretKey::AniListToken,
+        };
+        matches!(self.secrets.get(key), Ok(Some(_)))
+    }
+
+    /// Removes the active service's tokens. The username stays, so a public
+    /// list can still be read.
+    pub fn forget_tokens(&self) -> Result<()> {
+        match self.state.service {
+            ServiceId::MyAnimeList => {
+                self.secrets.delete(SecretKey::MyAnimeListAccessToken)?;
+                self.secrets.delete(SecretKey::MyAnimeListRefreshToken)?;
+            }
+            ServiceId::AniList | ServiceId::Kitsu => {
+                self.secrets.delete(SecretKey::AniListToken)?;
+            }
+        }
+        Ok(())
     }
 
     /// A local list was kept before, so moving to this computer opens it
@@ -142,6 +206,28 @@ impl Context {
         let mut state = AppState::new(db, settings, self.state.accounts.clone())?;
         // Signing in is about the account, not the list, and still holds.
         state.signed_in = self.state.signed_in;
+        // Saved before switching, so a failure leaves the app and the next
+        // start on the same list.
+        self.settings_file.save(&state.settings)?;
+        self.state = state;
+        Ok(())
+    }
+
+    /// Makes `service`'s account list the current one. Each service keeps its
+    /// own database, so switching back finds the list, the library links
+    /// and the history where they were.
+    pub fn use_account(&mut self, service: ServiceId) -> Result<()> {
+        let mut settings = self.state.settings.clone();
+        settings.list = Some(ListLocation::Account);
+        let same_service = settings.service == service;
+        settings.service = service;
+        let db = Database::open(&database_file(&self.folders, &settings))?;
+        let mut state = AppState::new(db, settings, self.state.accounts.clone())?;
+        // Signing in was to the old service; the new one has to check its
+        // own token.
+        if same_service {
+            state.signed_in = self.state.signed_in;
+        }
         // Saved before switching, so a failure leaves the app and the next
         // start on the same list.
         self.settings_file.save(&state.settings)?;
@@ -243,5 +329,55 @@ mod tests {
         context.move_list(ListLocation::Local, false).unwrap();
         assert!(context.state.entries.is_empty());
         assert!(context.state.anime.is_empty());
+    }
+
+    #[test]
+    fn each_service_keeps_its_own_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = open(dir.path());
+        context
+            .state
+            .store_anime(vec![Anime::new(AnimeId(1))])
+            .unwrap();
+        let mut entry = ListEntry::new(AnimeId(1));
+        entry.watched_episodes = 3;
+        context
+            .state
+            .save_entry(entry, Timestamp::UNIX_EPOCH)
+            .unwrap();
+        context.state.signed_in = true;
+
+        context.use_account(ServiceId::MyAnimeList).unwrap();
+        assert_eq!(context.state.service, ServiceId::MyAnimeList);
+        assert_eq!(watched(&context), None);
+        assert!(
+            !context.state.signed_in,
+            "the new service checks its own token"
+        );
+        assert_eq!(
+            open(dir.path()).state.settings.service,
+            ServiceId::MyAnimeList
+        );
+
+        context.use_account(ServiceId::AniList).unwrap();
+        assert_eq!(watched(&context), Some(3));
+    }
+
+    #[test]
+    fn tokens_go_to_the_active_service() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut context = open(dir.path());
+        context.use_account(ServiceId::MyAnimeList).unwrap();
+        context
+            .store_tokens(&Tokens {
+                access: "a".into(),
+                refresh: "r".into(),
+            })
+            .unwrap();
+        let account = context.account().unwrap();
+        assert_eq!(account.token.as_deref(), Some("a"));
+        assert_eq!(account.refresh_token.as_deref(), Some("r"));
+        context.forget_tokens().unwrap();
+        assert_eq!(context.account().unwrap().token, None);
     }
 }

@@ -18,8 +18,8 @@ use jiff::Timestamp;
 use shiori_app::refresh::anime_to_refresh;
 use shiori_app::state::AppEvent;
 use shiori_app::{backup, upload};
-use shiori_core::AnimeId;
 use shiori_core::entry::is_in_list;
+use shiori_core::{AnimeId, ServiceId};
 use shiori_store::ListLocation;
 use shiori_sync::anilist::AniList;
 
@@ -31,7 +31,51 @@ use super::pages;
 impl Model {
     /// There is an account to synchronize with, signed in or not.
     pub fn has_account(&self) -> bool {
-        !self.state().accounts.anilist.username.is_empty() || self.account().token.is_some()
+        let account = self.account();
+        !account.username.is_empty() || account.token.is_some()
+    }
+
+    /// Makes `service`'s account list the current one, from this computer's
+    /// list or from another service's account.
+    pub fn use_account(&mut self, service: ServiceId, cx: &mut Context<Self>) -> bool {
+        if self.syncing {
+            self.set_error("Wait for synchronization to finish.", cx);
+            return false;
+        }
+        if let Err(error) = self.startup.use_account(service) {
+            tracing::error!("Could not open the list: {error:#}");
+            self.set_error(format!("Could not open the list: {error:#}"), cx);
+            return false;
+        }
+        if let Err(error) = self.rebuild_clients() {
+            self.set_error(format!("Could not reach {}: {error:#}", service.name()), cx);
+        }
+        self.list_replaced(cx);
+        self.set_status(format!("Using your {} list.", service.name()), cx);
+        if self.state().settings.sync_enabled && self.account().token.is_some() {
+            self.synchronize(cx);
+        }
+        true
+    }
+
+    /// Removes the active service's tokens. The username and the list stay;
+    /// a public list can still be read.
+    pub fn sign_out(&mut self, cx: &mut Context<Self>) {
+        if self.syncing {
+            self.set_error("Wait for synchronization to finish.", cx);
+            return;
+        }
+        if let Err(error) = self.startup.forget_tokens() {
+            self.set_error(format!("Could not remove the token: {error:#}"), cx);
+            return;
+        }
+        if let Some(service) = self.service().as_myanimelist() {
+            service.forget_tokens();
+        }
+        self.startup.state.signed_in = false;
+        let name = self.service_name();
+        self.emit(vec![AppEvent::AuthenticationChanged(false)], cx);
+        self.set_status(format!("Signed out of {name}."), cx);
     }
 
     /// Opens the list kept at `to` in place of the current one.
@@ -133,19 +177,32 @@ impl Model {
                 return false;
             }
         };
-        let result = upload::merge(
-            &mut self.startup.state,
-            &loaded.anime,
-            loaded.entries.into_values(),
-            Timestamp::now(),
-        );
+        // A MyAnimeList account uses other ids than the local list.
+        let (anime, entries, skipped) = if self.state().service == ServiceId::MyAnimeList {
+            upload::to_mal_ids(&loaded.anime, loaded.entries.into_values())
+        } else {
+            (
+                loaded.anime,
+                loaded.entries.into_values().collect(),
+                Vec::new(),
+            )
+        };
+        if !skipped.is_empty() {
+            tracing::info!("Not uploaded, no MyAnimeList id: {}", skipped.join(", "));
+        }
+        let result = upload::merge(&mut self.startup.state, &anime, entries, Timestamp::now());
         match result {
             Ok((merged, events)) => {
                 self.emit(events, cx);
                 let service = self.service_name();
+                let left_out = match skipped.len() {
+                    0 => String::new(),
+                    1 => format!(" Not on {service}: {}.", skipped[0]),
+                    n => format!(" {n} anime are not on {service}."),
+                };
                 self.set_status(
                     format!(
-                        "Uploading to {service}: {} new, {} updated.",
+                        "Uploading to {service}: {} new, {} updated.{left_out}",
                         merged.added, merged.updated
                     ),
                     cx,
@@ -250,7 +307,7 @@ impl Model {
         cx: &mut Context<Self>,
     ) {
         let rest = ids.split_off(ids.len().min(AniList::IDS_PER_REQUEST));
-        let service = self.service().clone();
+        let service = self.anilist().clone();
         self.request(
             async move { service.fetch_anime_by_ids(&ids).await },
             cx,
@@ -275,6 +332,43 @@ impl Model {
                         this.set_error(format!("Could not refresh anime data: {error}"), cx);
                     }
                 }
+            },
+        );
+    }
+}
+
+impl Model {
+    /// For a MyAnimeList list: copies next-episode times from AniList, 50
+    /// anime to a request, one request at a time. Quiet on failure; the
+    /// schedule is then only as fresh as the last time this worked.
+    pub(super) fn borrow_airing_times(&mut self, cx: &mut Context<Self>) {
+        if self.state().catalog_service() != ServiceId::MyAnimeList {
+            return;
+        }
+        let ids = shiori_app::airing::ids_to_look_up(self.state());
+        self.airing_batch(ids, cx);
+    }
+
+    fn airing_batch(&mut self, mut ids: Vec<u32>, cx: &mut Context<Self>) {
+        if ids.is_empty() {
+            return;
+        }
+        let rest = ids.split_off(ids.len().min(AniList::IDS_PER_REQUEST));
+        let service = self.anilist().clone();
+        self.request(
+            async move { service.fetch_anime_by_mal_ids(&ids).await },
+            cx,
+            move |this, result, cx| match result {
+                Ok(found) => {
+                    let updated =
+                        shiori_app::airing::with_airing_times(&this.state().anime, &found);
+                    if !updated.is_empty() {
+                        let result = this.startup.state.store_anime(updated);
+                        this.apply(result, cx);
+                    }
+                    this.airing_batch(rest, cx);
+                }
+                Err(error) => tracing::warn!("Could not get airing times from AniList: {error}"),
             },
         );
     }
@@ -452,9 +546,23 @@ pub fn ask_first(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
         let model = model.clone();
         Rc::new(move |window, cx| {
             model.update(cx, |model, cx| {
-                model.move_list(ListLocation::Account, false, cx)
+                model.use_account(ServiceId::AniList, cx);
             });
             pages::settings::open(&model, window, cx);
+        })
+    };
+    // Straight to signing in (decision I39); cancelling it leaves the user
+    // in Settings with MyAnimeList chosen.
+    let myanimelist: Run = {
+        let model = model.clone();
+        Rc::new(move |window, cx| {
+            let switched = model.update(cx, |model, cx| {
+                model.use_account(ServiceId::MyAnimeList, cx)
+            });
+            if switched {
+                pages::settings::open(&model, window, cx);
+                super::mal_sign_in::open(&model, window, cx);
+            }
         })
     };
     let local: Run = {
@@ -478,6 +586,13 @@ pub fn ask_first(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
                 "Synced with AniList",
                 false,
                 account,
+            ),
+            card(
+                AppIcon::Cloud,
+                "In my MyAnimeList account",
+                "Synced with MyAnimeList",
+                false,
+                myanimelist,
             ),
         ],
         window,
@@ -545,102 +660,204 @@ fn to_local(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
     );
 }
 
+/// Where Settings can put the list: this computer, or one service's account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Local,
+    Account(ServiceId),
+}
+
+/// Where the list is now, as Settings shows it. Before the user has chosen,
+/// an existing account means the list is already the account's.
+pub fn current_place(model: &Model) -> Place {
+    let state = model.state();
+    match state.settings.list {
+        Some(ListLocation::Local) => Place::Local,
+        Some(ListLocation::Account) => Place::Account(state.service),
+        None if model.has_account() => Place::Account(state.service),
+        None => Place::Local,
+    }
+}
+
 /// Moves the list from Settings, after asking.
-pub fn change(model: &Entity<Model>, to: ListLocation, window: &mut Window, cx: &mut App) {
-    let (current, has_local, service, count, signed_in) = {
+pub fn change(model: &Entity<Model>, to: Place, window: &mut Window, cx: &mut App) {
+    let (current, chosen, has_local, active, count) = {
         let model = model.read(cx);
         (
+            current_place(model),
             model.state().settings.list,
             model.startup.has_local_list(),
-            model.service_name(),
+            model.state().service,
             list_count(model),
-            model.account().token.is_some(),
         )
     };
-    if current == Some(to) {
+    if current == to {
         return;
     }
     let model = model.clone();
-    match to {
-        // Nothing was chosen yet, so the list already is the account's;
-        // choosing only records it.
-        ListLocation::Account if current.is_none() => model.update(cx, |model, cx| {
+    let service = match to {
+        Place::Local if !has_local => return to_local(&model, window, cx),
+        Place::Local => {
+            let name = active.name();
+            return ask(
+                "Use the list on this computer?",
+                Vec::new(),
+                vec![card(
+                    AppIcon::Laptop,
+                    "Use this computer",
+                    format!("Your {name} list stays as it is"),
+                    true,
+                    Rc::new(move |window, cx| to_local(&model, window, cx)),
+                )],
+                window,
+                cx,
+            );
+        }
+        Place::Account(service) => service,
+    };
+    // Nothing was chosen yet, so the list already is the account's;
+    // choosing only records it.
+    if chosen.is_none() && service == active {
+        model.update(cx, |model, cx| {
             model.move_list(ListLocation::Account, false, cx)
-        }),
-        ListLocation::Local if !has_local => to_local(&model, window, cx),
-        ListLocation::Local => ask(
-            "Use the list on this computer?",
-            Vec::new(),
+        });
+        return;
+    }
+    let name = service.name();
+    let signed_in = model.read(cx).startup.has_token(service);
+    // Switches, then signs in or uploads as asked. Signing in to
+    // MyAnimeList is its own dialog; AniList's token field is in Settings.
+    let use_account = |upload: bool| -> Run {
+        let model = model.clone();
+        Rc::new(move |window, cx| {
+            let switched = model.update(cx, |model, cx| {
+                let switched = model.use_account(service, cx);
+                if switched && upload {
+                    model.upload_local_list(cx);
+                }
+                switched
+            });
+            if switched && !signed_in && service == ServiceId::MyAnimeList {
+                super::mal_sign_in::open(&model, window, cx);
+            }
+        })
+    };
+    if let Place::Account(from) = current {
+        // From one account to another: nothing is copied, each service has
+        // its own list (decision I40).
+        let from_count = count;
+        return ask(
+            if signed_in {
+                "Switch to your other account?"
+            } else {
+                "Switch service?"
+            },
+            vec![
+                stat(AppIcon::Cloud, from.name(), format!("{from_count} anime")),
+                stat(
+                    AppIcon::Cloud,
+                    name,
+                    if signed_in {
+                        "signed in"
+                    } else {
+                        "not signed in"
+                    },
+                ),
+            ],
             vec![card(
-                AppIcon::Laptop,
-                "Use this computer",
-                format!("Your {service} list stays as it is"),
+                if signed_in {
+                    AppIcon::Cloud
+                } else {
+                    AppIcon::LogIn
+                },
+                &format!("Use {name}"),
+                format!(
+                    "Your {} list stays as it is. Library links, numbering and history are \
+                     kept per service.",
+                    from.name()
+                ),
                 true,
-                Rc::new(move |window, cx| to_local(&model, window, cx)),
+                use_account(false),
             )],
             window,
             cx,
-        ),
-        ListLocation::Account => {
-            let use_account = |upload: bool| -> Run {
-                let model = model.clone();
-                Rc::new(move |_, cx| {
-                    model.update(cx, |model, cx| {
-                        model.move_list(ListLocation::Account, false, cx);
-                        if upload {
-                            model.upload_local_list(cx);
-                        }
-                    })
-                })
-            };
-            let here = stat(AppIcon::Laptop, count.to_string(), "on this computer");
-            let there = stat(AppIcon::Cloud, service, "your account");
-            let (stats, cards) = if count == 0 {
-                (
-                    Vec::new(),
-                    vec![card(
-                        AppIcon::Cloud,
-                        "Use AniList",
-                        "You can switch back any time",
-                        true,
-                        use_account(false),
-                    )],
-                )
-            } else if signed_in {
-                (
-                    vec![here, there],
-                    vec![
-                        card(
-                            AppIcon::CloudUpload,
-                            "Upload my list",
-                            "Adds what AniList lacks. Removes nothing.",
-                            true,
-                            use_account(true),
-                        ),
-                        card(
-                            AppIcon::Cloud,
-                            "Just use AniList",
-                            "Keep the list on this computer apart",
-                            false,
-                            use_account(false),
-                        ),
-                    ],
-                )
-            } else {
-                (
-                    vec![here],
-                    vec![card(
-                        AppIcon::LogIn,
-                        "Use AniList",
-                        "Sign in, then upload from Settings",
-                        true,
-                        use_account(false),
-                    )],
-                )
-            };
-            ask("Use your AniList account?", stats, cards, window, cx);
-        }
+        );
     }
+    // From this computer. A MyAnimeList account needs MyAnimeList ids
+    // (decision I38); anime without one stay here, and the hint says so.
+    let (uploadable, left_out) = if service == ServiceId::MyAnimeList {
+        let state = model.read(cx).state();
+        let (_, entries, skipped) =
+            shiori_app::upload::to_mal_ids(&state.anime, state.entries.values().cloned());
+        (entries.len(), skipped.len())
+    } else {
+        (count, 0)
+    };
+    let upload_hint = match left_out {
+        0 => format!("Adds what {name} lacks. Removes nothing."),
+        1 => format!("Adds what {name} lacks. 1 anime is not on {name} and stays here."),
+        n => format!("Adds what {name} lacks. {n} anime are not on {name} and stay here."),
+    };
+    let here = stat(AppIcon::Laptop, count.to_string(), "on this computer");
+    let there = stat(
+        AppIcon::Cloud,
+        uploadable.to_string(),
+        format!("can go to {name}"),
+    );
+    let (stats, cards) = if count == 0 {
+        (
+            Vec::new(),
+            vec![card(
+                AppIcon::Cloud,
+                &format!("Use {name}"),
+                "You can switch back any time",
+                true,
+                use_account(false),
+            )],
+        )
+    } else if signed_in {
+        (
+            vec![here, there],
+            vec![
+                card(
+                    AppIcon::CloudUpload,
+                    "Upload my list",
+                    upload_hint,
+                    true,
+                    use_account(true),
+                ),
+                card(
+                    AppIcon::Cloud,
+                    &format!("Just use {name}"),
+                    "Keep the list on this computer apart",
+                    false,
+                    use_account(false),
+                ),
+            ],
+        )
+    } else {
+        (
+            vec![here, there],
+            vec![card(
+                AppIcon::LogIn,
+                &format!("Use {name}"),
+                "Sign in, then upload from Settings",
+                true,
+                use_account(false),
+            )],
+        )
+    };
+    ask(
+        if name == "AniList" {
+            "Use your AniList account?"
+        } else {
+            "Use your MyAnimeList account?"
+        },
+        stats,
+        cards,
+        window,
+        cx,
+    );
 }
 
 /// Uploads the list on this computer from Settings, after asking.
@@ -672,7 +889,7 @@ pub fn ask_upload(model: &Entity<Model>, window: &mut Window, cx: &mut App) {
         vec![card(
             AppIcon::CloudUpload,
             "Upload",
-            "Adds what AniList lacks. Removes nothing.",
+            format!("Adds what {service} lacks. Removes nothing."),
             true,
             Rc::new(move |_, cx| model.update(cx, |model, cx| model.upload_local_list(cx))),
         )],

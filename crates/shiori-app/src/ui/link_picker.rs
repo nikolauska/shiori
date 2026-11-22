@@ -18,7 +18,8 @@ use gpui_component::{
 use shiori_core::entry::is_in_list;
 use shiori_core::recognition::{is_generic_title, linked_to, normalize, title_to_remember};
 use shiori_core::{
-    Action, AnimeId, ElementKind, Episode, ListStatus, Reason, SearchParams, decide_update,
+    Action, AnimeId, ElementKind, Episode, ListStatus, Reason, SearchParams, ServiceId,
+    decide_update,
 };
 
 use shiori_app::tracking::close_anime;
@@ -44,11 +45,11 @@ enum Group {
 }
 
 impl Group {
-    fn label(self) -> &'static str {
+    fn label(self, service: ServiceId) -> String {
         match self {
-            Group::Close => "Close matches",
-            Group::List => "In your list",
-            Group::Online => "On AniList",
+            Group::Close => "Close matches".to_owned(),
+            Group::List => "In your list".to_owned(),
+            Group::Online => format!("On {}", service.name()),
         }
     }
 }
@@ -101,7 +102,7 @@ pub struct LinkPicker {
     episode: Episode,
     query: Entity<InputState>,
     results: Vec<(Group, AnimeId)>,
-    /// Found on AniList for `searched`.
+    /// Found on the list's service for `searched`.
     online: Vec<AnimeId>,
     searched: Option<String>,
     searching: bool,
@@ -466,6 +467,7 @@ impl LinkPicker {
 
 impl Render for LinkPicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let service = self.model.read(cx).state().catalog_service();
         let muted = cx.theme().muted_foreground;
         let text = self.query.read(cx).value().trim().to_owned();
         let mut list: Vec<AnyElement> = Vec::new();
@@ -480,7 +482,7 @@ impl Render for LinkPicker {
                         .text_xs()
                         .font_semibold()
                         .text_color(muted)
-                        .child(group.label().to_uppercase())
+                        .child(group.label(service).to_uppercase())
                         .into_any_element(),
                 );
             }
@@ -498,11 +500,11 @@ impl Render for LinkPicker {
         }
         let searched_here = self.searched.as_deref() == Some(text.as_str());
         let search_label = if self.searching {
-            "Searching…"
+            "Searching…".to_owned()
         } else if searched_here && self.online.is_empty() {
-            "Nothing on AniList"
+            format!("Nothing on {}", service.name())
         } else {
-            "Search AniList"
+            format!("Search {}", service.name())
         };
 
         let selected = self.selected;

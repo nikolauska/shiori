@@ -56,6 +56,7 @@ fn account() -> Account {
     Account {
         username: "someone".into(),
         token: Some("tok".into()),
+        refresh_token: None,
     }
 }
 

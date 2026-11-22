@@ -253,6 +253,7 @@ mod tests {
         Account {
             username: "someone".into(),
             token: Some("tok".into()),
+            refresh_token: None,
         }
     }
 
@@ -415,6 +416,7 @@ mod tests {
         let account = Account {
             username: "someone".into(),
             token: None,
+            refresh_token: None,
         };
         synchronize(&mut state, &service, &account, &Quiet)
             .await

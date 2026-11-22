@@ -11,6 +11,8 @@ use crate::ServiceError;
 pub struct Account {
     pub username: String,
     pub token: Option<String>,
+    /// Only MyAnimeList has one; its access tokens expire after an hour.
+    pub refresh_token: Option<String>,
 }
 
 // Written by hand so that a token never ends up in a log line.
@@ -19,7 +21,24 @@ impl std::fmt::Debug for Account {
         f.debug_struct("Account")
             .field("username", &self.username)
             .field("token", &self.token.as_ref().map(|_| "<hidden>"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<hidden>"),
+            )
             .finish()
+    }
+}
+
+/// A pair of OAuth tokens, from signing in or from a refresh.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Tokens {
+    pub access: String,
+    pub refresh: String,
+}
+
+impl std::fmt::Debug for Tokens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Tokens { <hidden> }")
     }
 }
 
@@ -62,6 +81,13 @@ pub struct SearchPage {
 /// thread's runtime.
 pub trait Service {
     fn id(&self) -> ServiceId;
+
+    /// Tokens the service refreshed by itself since the last call, for the
+    /// app to store. Returned once. A separate call rather than part of every
+    /// answer so that the other methods keep one signature for all services.
+    fn take_refreshed_tokens(&self) -> Option<Tokens> {
+        None
+    }
 
     /// Checks the stored credentials and returns who the user is.
     fn authenticate(

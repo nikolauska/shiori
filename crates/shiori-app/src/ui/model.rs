@@ -17,6 +17,8 @@ use shiori_sync::queue::{Request, Step};
 use shiori_sync::sync::{SyncAction, SyncState, should_auto_process, sync_action};
 use shiori_sync::{Account, PageToken, Service, ServiceError};
 
+use shiori_app::service::ActiveService;
+
 use shiori_app::posters;
 use shiori_app::startup::Context as Startup;
 use shiori_app::state::{AppEvent, AppState};
@@ -37,7 +39,11 @@ pub struct Status {
 
 pub struct Model {
     pub startup: Startup,
-    service: AniList,
+    /// The account's service: synchronizing and the queue.
+    service: ActiveService,
+    /// AniList, for anime data of a list on this computer and for what only
+    /// AniList has (relations, airing times, lookups by MyAnimeList id).
+    anilist: AniList,
     runtime: tokio::runtime::Runtime,
     /// For downloads that are not service requests, such as posters.
     http: reqwest::Client,
@@ -90,6 +96,7 @@ impl EventEmitter<UiRequest> for Model {}
 impl Model {
     pub fn new(startup: Startup) -> anyhow::Result<Self> {
         let service = startup.service()?;
+        let anilist = startup.anilist()?;
         // One worker is enough: requests are few and mostly sequential, and
         // it keeps networking on its own thread as the design asks.
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -107,6 +114,7 @@ impl Model {
         Ok(Self {
             startup,
             service,
+            anilist,
             runtime,
             http,
             status: Status::default(),
@@ -129,8 +137,42 @@ impl Model {
         &self.startup.state
     }
 
-    pub(super) fn service(&self) -> &AniList {
+    pub(super) fn service(&self) -> &ActiveService {
         &self.service
+    }
+
+    pub(super) fn anilist(&self) -> &AniList {
+        &self.anilist
+    }
+
+    /// Where anime data comes from: AniList for a list on this computer,
+    /// whose ids are AniList's, otherwise the account's service.
+    pub(super) fn catalog(&self) -> ActiveService {
+        if self.state().is_local() {
+            ActiveService::AniList(self.anilist.clone())
+        } else {
+            self.service.clone()
+        }
+    }
+
+    /// Builds the service clients again, after the active service or the
+    /// proxy changed. Requests already running finish on the old ones.
+    pub(super) fn rebuild_clients(&mut self) -> anyhow::Result<()> {
+        self.service = self.startup.service()?;
+        self.anilist = self.startup.anilist()?;
+        self.http = self.startup.network()?.client()?;
+        Ok(())
+    }
+
+    /// MyAnimeList refreshes its token by itself during a request; the new
+    /// pair has to reach the keychain before the old one is used again.
+    fn store_refreshed_tokens(&mut self, cx: &mut Context<Self>) {
+        if let Some(tokens) = self.service.take_refreshed_tokens()
+            && let Err(error) = self.startup.store_tokens(&tokens)
+        {
+            tracing::error!("Could not store the refreshed token: {error:#}");
+            self.set_error(format!("Could not store the token: {error:#}"), cx);
+        }
     }
 
     pub fn service_name(&self) -> &'static str {
@@ -140,9 +182,13 @@ impl Model {
     pub(super) fn account(&self) -> Account {
         self.startup.account().unwrap_or_else(|error| {
             tracing::error!("Could not read the token: {error:#}");
+            let accounts = &self.startup.state.accounts;
             Account {
-                username: self.startup.state.accounts.anilist.username.clone(),
-                token: None,
+                username: match self.startup.state.service {
+                    shiori_core::ServiceId::MyAnimeList => accounts.myanimelist.username.clone(),
+                    _ => accounts.anilist.username.clone(),
+                },
+                ..Account::default()
             }
         })
     }
@@ -173,6 +219,7 @@ impl Model {
             let result = handle.await;
             let _ = this.update(cx, |this, cx| {
                 this.status.busy = false;
+                this.store_refreshed_tokens(cx);
                 match result {
                     Ok(result) => then(this, result, cx),
                     Err(error) => this.set_error(format!("Request failed: {error}"), cx),
@@ -214,7 +261,7 @@ impl Model {
         }
     }
 
-    fn service_error(&mut self, error: ServiceError, cx: &mut Context<Self>) {
+    pub(super) fn service_error(&mut self, error: ServiceError, cx: &mut Context<Self>) {
         let events = self.startup.state.apply_service_error(&error);
         self.emit(events, cx);
     }
@@ -301,7 +348,7 @@ impl Model {
 
     /// Fetches the anime again. "Not found" means the service removed it.
     pub fn refresh_anime(&mut self, id: AnimeId, cx: &mut Context<Self>) {
-        let service = self.service.clone();
+        let service = self.catalog();
         let title = self.state().title(id);
         self.set_status(format!("Refreshing {title}..."), cx);
         self.request(
@@ -334,10 +381,11 @@ impl Model {
         cx: &mut Context<Self>,
     ) {
         let before = self.state().settings.clone();
-        // Where the list lives changes only with `move_list`, which also
-        // opens the other database; a settings draft made before a move
-        // must not undo it.
+        // Where the list lives, and on which service, changes only with
+        // `move_list` and `use_account`, which also open the other database;
+        // a settings draft made before a move must not undo it.
         settings.list = before.list;
+        settings.service = before.service;
         if let Err(error) = self.startup.settings_file.save(&settings) {
             self.set_error(format!("Could not save settings: {error:#}"), cx);
             return;
@@ -356,18 +404,8 @@ impl Model {
         self.startup.state.settings = settings;
         // The HTTP clients are built with the proxy, so a new proxy needs new
         // clients. Requests already running finish on the old ones.
-        if proxy_changed {
-            let clients = self
-                .startup
-                .service()
-                .and_then(|service| Ok((service, self.startup.network()?.client()?)));
-            match clients {
-                Ok((service, http)) => {
-                    self.service = service;
-                    self.http = http;
-                }
-                Err(error) => self.set_error(format!("Proxy settings: {error:#}"), cx),
-            }
+        if proxy_changed && let Err(error) = self.rebuild_clients() {
+            self.set_error(format!("Proxy settings: {error:#}"), cx);
         }
         let detection_changed = before.detection_enabled != self.state().settings.detection_enabled
             || before.detection_interval_ms != self.state().settings.detection_interval_ms;
@@ -412,7 +450,7 @@ impl Model {
         cx: &mut Context<Self>,
         done: impl FnOnce(Option<(Vec<AnimeId>, Option<PageToken>)>, &mut gpui::App) + 'static,
     ) {
-        let service = self.service.clone();
+        let service = self.catalog();
         self.set_status("Searching...", cx);
         self.request(
             async move { service.search(&params, page).await },
@@ -447,7 +485,10 @@ impl Model {
         if !self.posters.pending.insert(id) {
             return;
         }
-        let folder = self.startup.folders.poster_folder(self.state().service);
+        let folder = self
+            .startup
+            .folders
+            .poster_folder(self.state().catalog_service());
         let client = self.http.clone();
         let today = format::today_in_japan();
         let task = self.runtime.spawn(async move {
@@ -658,6 +699,7 @@ impl Model {
                                 if !this.status.is_error {
                                     this.set_status("List synchronized.", cx);
                                 }
+                                this.borrow_airing_times(cx);
                                 if std::mem::take(&mut this.pending_upload) {
                                     uploaded = this.upload_now(cx);
                                 }
@@ -737,6 +779,7 @@ impl Model {
         let account = Account {
             username: String::new(),
             token: Some(token.clone()),
+            refresh_token: None,
         };
         self.set_status(
             format!("Authenticating with {}...", self.service_name()),

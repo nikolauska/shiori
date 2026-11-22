@@ -8,7 +8,9 @@ use gpui::Context;
 use shiori_core::recognition::{
     Chain, ChainStep, NumberMiss, NumberingSequence, Proposal, number_miss, propose, series_chain,
 };
-use shiori_core::{AnimeId, AnimeType, Element, Relation};
+use shiori_core::{Anime, AnimeId, AnimeType, Element, Relation, RelationKind, ServiceId};
+use shiori_sync::ServiceError;
+use shiori_sync::anilist::AniList;
 
 use super::model::Model;
 
@@ -36,6 +38,27 @@ pub enum SuggestionState {
     Failed,
 }
 
+/// Relations only AniList has, for a MyAnimeList list: the anime is found on
+/// AniList by its MyAnimeList id, and the related anime are given their
+/// MyAnimeList ids. Related anime MyAnimeList does not have are left out.
+async fn relations_by_mal_id(
+    anilist: &AniList,
+    id: AnimeId,
+) -> Result<Vec<(RelationKind, Anime)>, ServiceError> {
+    let found = anilist.fetch_anime_by_mal_ids(&[id.0]).await?;
+    let Some(anilist_id) = found.first().map(|a| a.id) else {
+        return Ok(Vec::new());
+    };
+    let related = anilist.fetch_relations(anilist_id).await?;
+    Ok(related
+        .into_iter()
+        .filter_map(|(kind, mut anime)| {
+            anime.id = AnimeId(anime.mal_id?);
+            Some((kind, anime))
+        })
+        .collect())
+}
+
 /// Seasons are TV and web series; movies, OVAs and specials are numbered
 /// apart, unless the user includes one on purpose.
 pub fn is_series(model: &Model, id: AnimeId) -> bool {
@@ -55,12 +78,25 @@ impl Model {
         cx: &mut Context<Self>,
         then: impl FnOnce(&mut Self, Result<(), String>, &mut Context<Self>) + 'static,
     ) {
-        let service = self.service().clone();
+        let service = self.anilist().clone();
+        let on_myanimelist = self.state().catalog_service() == ServiceId::MyAnimeList;
         self.request(
-            async move { service.fetch_relations(id).await },
+            async move {
+                if on_myanimelist {
+                    relations_by_mal_id(&service, id).await
+                } else {
+                    service.fetch_relations(id).await
+                }
+            },
             cx,
             move |this, result, cx| match result {
-                Ok(related) => {
+                Ok(mut related) => {
+                    if on_myanimelist {
+                        // AniList's data for anime already in the list would
+                        // replace MyAnimeList's own; only new ones are stored.
+                        let known = &this.state().anime;
+                        related.retain(|(_, a)| !known.contains_key(&a.id));
+                    }
                     let relations = related
                         .iter()
                         .map(|(kind, anime)| Relation {

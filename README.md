@@ -25,7 +25,7 @@ Shiori is a desktop app for Windows and Linux that notices which anime episode y
 
 **Your anime folders become a library.** Point Shiori at the folders where you keep episodes. It recognizes the files, and "Play next episode" (Ctrl+N) opens the right file in your player. Can't decide? Ctrl+R plays a random show from your Watching list.
 
-**No account needed.** Keep your list on AniList, or only on your computer. A list kept on your computer can import a MyAnimeList XML export or anyone's public AniList list, and can be uploaded to your AniList account later.
+**No account needed.** Keep your list on AniList or MyAnimeList, or only on your computer. A list kept on your computer can import a MyAnimeList XML export or anyone's public AniList list, and can be uploaded to your AniList or MyAnimeList account later.
 
 **Offline is fine.** Changes you make without a connection wait in a queue and go out the next time Shiori can reach the service.
 
@@ -48,7 +48,7 @@ Shiori follows your system theme, or you can pick light or dark in Settings.
 
 Shiori is in early releases. It works day to day, but some things are still missing:
 
-- **List services:** only AniList is supported. MyAnimeList and Kitsu are planned for a later version.
+- **List services:** AniList and MyAnimeList are supported. Kitsu is planned for a later version.
 - **Installers:** there are no installers or distribution packages yet. The downloads below are the program in an archive.
 - **macOS:** not supported.
 

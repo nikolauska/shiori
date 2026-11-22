@@ -6,9 +6,9 @@ Every setting, what it does, and its starting value.
 
 | Setting | Starts as | What it does |
 | --- | --- | --- |
-| Where your list lives | Asked on first start | "On this computer" or "In my AniList account". See [Keeping your list on this computer](sync.md#keeping-your-list-on-this-computer). Without an account and before you answer, Shiori asks each time it starts. |
+| Where your list lives | Asked on first start | "On this computer", "In my AniList account" or "In my MyAnimeList account". In Settings these are three cards under "Your list"; picking a service's card makes it the active service. See [Keeping your list on this computer](sync.md#keeping-your-list-on-this-computer). Without an account and before you answer, Shiori asks each time it starts. |
 | Back up every week | On | For a list on this computer: back it up once a week, keeping the last 4. |
-| Service | AniList | Which list service is active. Each service has its own separate list in Shiori. |
+| Service | AniList | Which list service is active: the account card chosen under "Your list". Each service has its own separate list in Shiori. |
 | Sync | On | Send your changes and fetch your list automatically. When off, this only happens when you choose "Synchronize". Hidden for a list on this computer. |
 | Account details | Empty | Depends on the service. See [Synchronizing with your list service](sync.md). |
 

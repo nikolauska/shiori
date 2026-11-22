@@ -63,7 +63,7 @@ impl Model {
             return;
         }
         let rest = ids.split_off(ids.len().min(AniList::IDS_PER_REQUEST));
-        let service = self.service().clone();
+        let service = self.anilist().clone();
         self.request(
             async move {
                 match lookup {
@@ -206,10 +206,11 @@ impl Model {
             return;
         }
         self.set_status(format!("Reading {username}'s list..."), cx);
-        let service = self.service().clone();
+        let service = self.anilist().clone();
         let account = Account {
             username: username.clone(),
             token: None,
+            refresh_token: None,
         };
         self.request(
             async move {

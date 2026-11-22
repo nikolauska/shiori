@@ -13,8 +13,8 @@ use gpui_component::resizable::{ResizableState, h_resizable, resizable_panel};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _, h_flex, v_flex,
 };
-use shiori_core::ListStatus;
 use shiori_core::entry::is_in_list;
+use shiori_core::{ListStatus, ServiceId};
 
 use shiori_app::home::continue_watching;
 
@@ -39,6 +39,8 @@ pub struct MainWindow {
     back: Vec<Page>,
     forward: Vec<Page>,
     search: Entity<InputState>,
+    /// The service the search box placeholder names.
+    search_service: ServiceId,
     pages: pages::Pages,
     inspector: Entity<Inspector>,
     split: Entity<ResizableState>,
@@ -47,7 +49,10 @@ pub struct MainWindow {
 
 impl MainWindow {
     pub fn new(model: Entity<Model>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search AniList"));
+        let search_service = model.read(cx).state().catalog_service();
+        let search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(format!("Search {}", search_service.name()))
+        });
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
             cx.subscribe_in(&search, window, |this, input, event, window, cx| {
@@ -110,6 +115,7 @@ impl MainWindow {
             back: Vec::new(),
             forward: Vec::new(),
             search,
+            search_service,
             pages,
             inspector,
             split: cx.new(|_| ResizableState::default()),
@@ -377,22 +383,26 @@ impl MainWindow {
             })
             .collect();
         let new_count = continue_watching(state).len();
-        let account = &state.accounts.anilist;
+        let service = state.service.name();
+        let username = match state.service {
+            ServiceId::MyAnimeList => &state.accounts.myanimelist.username,
+            _ => &state.accounts.anilist.username,
+        };
         let local = state.is_local();
         let (who, how) = if local {
             (
                 "On this computer".to_owned(),
                 super::list_location::backed_up(self.model.read(cx).last_backup),
             )
-        } else if account.username.is_empty() {
+        } else if username.is_empty() {
             (
                 "Not signed in".to_owned(),
-                "Add AniList in Settings".to_owned(),
+                format!("Add {service} in Settings"),
             )
         } else if state.signed_in {
-            (account.username.clone(), "AniList · signed in".to_owned())
+            (username.clone(), format!("{service} · signed in"))
         } else {
-            (account.username.clone(), "AniList".to_owned())
+            (username.clone(), service.to_owned())
         };
         let theme = cx.theme();
         let (muted, hover, active) = (
@@ -644,6 +654,15 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Search goes to the list's service, which changes with the list.
+        let catalog = self.model.read(cx).state().catalog_service();
+        if catalog != self.search_service {
+            self.search_service = catalog;
+            let placeholder = format!("Search {}", catalog.name());
+            self.search.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx)
+            });
+        }
         let beside = self.inspector_beside(window, cx);
         // A full page of an anime only makes sense while it cannot be shown
         // beside the list; once it can, go back to where the user was.

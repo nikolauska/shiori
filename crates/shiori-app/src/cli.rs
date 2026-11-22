@@ -7,11 +7,13 @@ use std::process::ExitCode;
 use anyhow::{Context as _, Result, anyhow, bail};
 use jiff::Timestamp;
 use shiori_core::entry::is_in_list;
-use shiori_core::{AnimeId, ListEntry, ListStatus};
+use shiori_core::{AnimeId, ListEntry, ListStatus, ServiceId};
 use shiori_store::SecretKey;
 use shiori_sync::anilist;
-use shiori_sync::anilist::score::{ScoreFormat, format_rating};
+use shiori_sync::myanimelist::auth::{self as mal_auth, Authorization, Listener};
 use shiori_sync::{Account, Service, ServiceError};
+
+use shiori_app::service::{ActiveService, format_rating};
 
 use shiori_app::single_instance::{self, Instance};
 use shiori_app::startup::Context;
@@ -24,7 +26,8 @@ Usage: shiori [--debug | --verbose] [<command>]
 Without a command, opens the window.
 
 Commands:
-  login                       Sign in to AniList with a token pasted from the browser
+  login                       Sign in to the service set in sync.service: AniList with
+                              a pasted token, MyAnimeList in the browser
   sync                        Send queued changes, then fetch the list
   list                        Show the list as stored locally
   set <anime id> [options]    Change an entry, then sync
@@ -120,23 +123,27 @@ pub fn run(args: &[String]) -> Result<ExitCode> {
 }
 
 async fn login() -> Result<ExitCode> {
-    let mut context = Context::open()?.with_notice();
+    let context = Context::open()?.with_notice();
+    match context.state.service {
+        ServiceId::MyAnimeList => login_myanimelist(context).await,
+        _ => login_anilist(context).await,
+    }
+}
+
+async fn login_anilist(mut context: Context) -> Result<ExitCode> {
     eprintln!(
         "Open this page, approve Shiori, and copy the token it shows:\n\n  {}\n",
         anilist::authorize_url()
     );
-    eprint!("Token: ");
-    std::io::stderr().flush()?;
-    let mut token = String::new();
-    std::io::stdin().lock().read_line(&mut token)?;
-    let token = token.trim();
+    let token = prompt("Token: ")?;
     if token.is_empty() {
         bail!("no token given");
     }
     let service = context.service()?;
     let account = Account {
         username: String::new(),
-        token: Some(token.to_owned()),
+        token: Some(token.clone()),
+        refresh_token: None,
     };
     eprintln!("Authenticating with AniList...");
     let info = match service.authenticate(&account).await {
@@ -148,11 +155,71 @@ async fn login() -> Result<ExitCode> {
     };
     // Stored only after AniList accepted it, so a mistyped token does not
     // replace a working one.
-    context.secrets.set(SecretKey::AniListToken, token)?;
+    context.secrets.set(SecretKey::AniListToken, &token)?;
     context.state.apply_sign_in(&info);
     context.save_accounts()?;
     eprintln!("Logged in as {}.", info.username);
     Ok(ExitCode::SUCCESS)
+}
+
+async fn login_myanimelist(mut context: Context) -> Result<ExitCode> {
+    let authorization = Authorization::new();
+    eprintln!(
+        "Open this page and approve Shiori:\n\n  {}\n",
+        authorization.url
+    );
+    let code = match Listener::bind() {
+        Ok(listener) => {
+            eprintln!("Waiting for MyAnimeList...");
+            let never = std::sync::atomic::AtomicBool::new(false);
+            // Nothing else runs in the command-line mode, so blocking here
+            // is fine.
+            listener.wait(
+                &authorization.state,
+                std::time::Duration::from_secs(5 * 60),
+                &never,
+            )?
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            let input = prompt(
+                "After approving, paste the address the browser shows (or just the code): ",
+            )?;
+            mal_auth::code_from_input(&input, &authorization.state)?
+        }
+    };
+    let ActiveService::MyAnimeList(service) = context.service()? else {
+        unreachable!("the service is MyAnimeList");
+    };
+    eprintln!("Authenticating with MyAnimeList...");
+    let tokens = match service.exchange_code(&code, &authorization.verifier).await {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            context.state.apply_service_error(&error);
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    context.store_tokens(&tokens)?;
+    let account = context.account()?;
+    let info = match service.authenticate(&account).await {
+        Ok(info) => info,
+        Err(error) => {
+            context.state.apply_service_error(&error);
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    context.state.apply_sign_in(&info);
+    context.save_accounts()?;
+    eprintln!("Logged in as {}.", info.username);
+    Ok(ExitCode::SUCCESS)
+}
+
+fn prompt(text: &str) -> Result<String> {
+    eprint!("{text}");
+    std::io::stderr().flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(line.trim().to_owned())
 }
 
 async fn sync() -> Result<ExitCode> {
@@ -163,7 +230,6 @@ async fn sync() -> Result<ExitCode> {
 fn list() -> Result<ExitCode> {
     let context = Context::open()?.with_notice();
     let state = &context.state;
-    let format = ScoreFormat::from_name(&state.accounts.anilist.rating_system);
     let mut entries: Vec<&ListEntry> = state
         .entries
         .values()
@@ -194,7 +260,7 @@ fn list() -> Result<ExitCode> {
             if entry.score == 0 {
                 "-".to_owned()
             } else {
-                format_rating(format, entry.score)
+                format_rating(state, entry.score)
             },
             state.title(entry.anime_id),
         );
@@ -276,9 +342,12 @@ async fn set(args: &[String]) -> Result<ExitCode> {
     let mut context = Context::open()?.with_notice();
     let id = AnimeId(args.id);
     if !context.state.anime.contains_key(&id) {
-        let anime = match context.service()?.fetch_anime(id).await {
+        let catalog = context.catalog()?;
+        let anime = match catalog.fetch_anime(id).await {
             Ok(anime) => anime,
-            Err(ServiceError::NotFound) => bail!("AniList has no anime with id {id}"),
+            Err(ServiceError::NotFound) => {
+                bail!("{} has no anime with id {id}", catalog.id().name())
+            }
             Err(error) => {
                 context.state.apply_service_error(&error);
                 return Ok(ExitCode::FAILURE);
@@ -338,7 +407,13 @@ async fn sync_and_save(context: &mut Context, events: &[AppEvent]) -> Result<Exi
     let account = context.account()?;
     let terminal = Terminal::default();
     terminal.events(&context.state, events);
-    synchronize(&mut context.state, &service, &account, &terminal).await?;
+    let result = synchronize(&mut context.state, &service, &account, &terminal).await;
+    // Stored even when the sync failed: a refreshed token may already have
+    // replaced the stored one on MyAnimeList's side.
+    if let Some(tokens) = service.take_refreshed_tokens() {
+        context.store_tokens(&tokens)?;
+    }
+    result?;
     context.save_accounts()?;
     Ok(terminal.exit_code())
 }

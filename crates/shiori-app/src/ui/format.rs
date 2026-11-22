@@ -1,10 +1,12 @@
 //! How values are written in the UI. Every user-visible string the views
 //! build goes through here or `text`, so translations can be added later.
 
+use shiori_core::ServiceId;
 use shiori_core::anime::airing_status;
 use shiori_core::date::Season;
 use shiori_core::{AiringStatus, Anime, AnimeType, FuzzyDate, ListEntry, SeasonName};
-use shiori_sync::anilist::score::{ScoreFormat, format_rating};
+use shiori_sync::anilist::score::{self, ScoreFormat};
+use shiori_sync::score::Rating;
 
 use shiori_app::list_view::ListColumn;
 use shiori_app::state::AppState;
@@ -129,15 +131,28 @@ pub fn date_label(date: FuzzyDate) -> String {
     }
 }
 
+/// Which stars or menu the score control shows. MyAnimeList scores whole
+/// numbers 1 to 10, the same steps as AniList's `POINT_10`.
 pub fn score_format(state: &AppState) -> ScoreFormat {
+    if state.catalog_service() == ServiceId::MyAnimeList {
+        return ScoreFormat::Point10;
+    }
     ScoreFormat::from_name(&state.accounts.anilist.rating_system)
+}
+
+/// The choices in the score menu, with the service's own labels.
+pub fn ratings(state: &AppState) -> Vec<Rating> {
+    if state.catalog_service() == ServiceId::MyAnimeList {
+        return shiori_sync::myanimelist::score::rating_list();
+    }
+    score::rating_list(score_format(state))
 }
 
 pub fn score_label(state: &AppState, score: u8) -> String {
     if score == 0 {
         String::new()
     } else {
-        format_rating(score_format(state), score)
+        shiori_app::service::format_rating(state, score)
     }
 }
 

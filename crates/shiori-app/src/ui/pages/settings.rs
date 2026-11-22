@@ -16,11 +16,12 @@ use gpui_component::{
     WindowExt as _, h_flex, v_flex,
 };
 use shiori_core::entry::is_in_list;
-use shiori_core::{AnimeId, TitleLanguage, UpdateTrigger};
-use shiori_store::{ColorScheme, ListLocation, ProxyKind, Settings, UPDATE_DELAY_RANGE};
+use shiori_core::{AnimeId, ServiceId, TitleLanguage, UpdateTrigger};
+use shiori_store::{ColorScheme, ProxyKind, Settings, UPDATE_DELAY_RANGE};
 use shiori_sync::anilist;
 
 use crate::ui::icons::AppIcon;
+use crate::ui::list_location::Place;
 use crate::ui::model::Model;
 use crate::ui::{actions, format, list_location, list_transfer, numbering_editor, widgets};
 
@@ -641,20 +642,25 @@ impl SettingsView {
         );
         let model = self.model.read(cx);
         let state = model.state();
-        let account = &state.accounts.anilist;
-        let signed_in = state.signed_in && !account.username.is_empty();
-        let who = if account.username.is_empty() {
-            "Not signed in".to_owned()
-        } else {
-            account.username.clone()
+        let service = state.service;
+        let name = service.name();
+        let who_on = |username: &str| {
+            if username.is_empty() {
+                "Not signed in".to_owned()
+            } else {
+                username.to_owned()
+            }
         };
-        // Before the user has chosen, an existing account means the list is
-        // already the account's.
-        let location = match state.settings.list {
-            Some(location) => location,
-            None if model.has_account() => ListLocation::Account,
-            None => ListLocation::Local,
+        let anilist_who = who_on(&state.accounts.anilist.username);
+        let mal_who = who_on(&state.accounts.myanimelist.username);
+        let username = match service {
+            ServiceId::MyAnimeList => &state.accounts.myanimelist.username,
+            _ => &state.accounts.anilist.username,
         };
+        let signed_in = state.signed_in && !username.is_empty();
+        let has_token = model.account().token.is_some();
+        let who = who_on(username);
+        let place = list_location::current_place(model);
         let local = state.is_local();
         let count = state
             .entries
@@ -670,9 +676,9 @@ impl SettingsView {
                              icon: AppIcon,
                              title: &'static str,
                              hint: String,
-                             to: ListLocation,
+                             to: Place,
                              cx: &App| {
-            let chosen = location == to;
+            let chosen = place == to;
             let handle = self.model.clone();
             widgets::option_card(id, icon, title, hint, chosen, cx).on_click(
                 move |_, window, cx| {
@@ -694,15 +700,25 @@ impl SettingsView {
                 AppIcon::Laptop,
                 "On this computer",
                 local_hint,
-                ListLocation::Local,
+                Place::Local,
+                cx,
+            ))
+            // Each service is its own list, so choosing one is choosing
+            // where the list lives (decision I40).
+            .child(location_card(
+                "location-anilist",
+                AppIcon::Cloud,
+                "AniList",
+                anilist_who,
+                Place::Account(ServiceId::AniList),
                 cx,
             ))
             .child(location_card(
-                "location-account",
+                "location-myanimelist",
                 AppIcon::Cloud,
-                "AniList",
-                who.clone(),
-                ListLocation::Account,
+                "MyAnimeList",
+                mal_who,
+                Place::Account(ServiceId::MyAnimeList),
                 cx,
             ));
 
@@ -831,31 +847,59 @@ impl SettingsView {
         }
 
         // Syncing and signing in mean nothing for a local list.
-        let account_card = h_flex()
-            .gap_3()
-            .p_3()
-            .rounded_lg()
-            .border_1()
-            .border_color(border)
-            .child(widgets::icon_tile(IconName::CircleUser, signed_in, cx))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().text_sm().font_semibold().child(who))
-                    .child(div().text_xs().text_color(muted).child(if signed_in {
-                        "Signed in"
-                    } else {
-                        "Authorize, then paste the token AniList shows"
-                    })),
-            )
-            .child(self.switch(
-                "sync",
-                "Sync",
-                d.sync_enabled,
-                |s, v| s.sync_enabled = v,
-                cx,
-            ));
+        let account_card =
+            h_flex()
+                .gap_3()
+                .p_3()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .child(widgets::icon_tile(IconName::CircleUser, signed_in, cx))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().text_sm().font_semibold().child(who))
+                        .child(div().text_xs().text_color(muted).child(
+                            match (signed_in, service) {
+                                (true, _) => "Signed in",
+                                (false, ServiceId::MyAnimeList) => "Sign in through the browser",
+                                (false, _) => "Authorize, then paste the token AniList shows",
+                            },
+                        )),
+                )
+                .child(self.switch(
+                    "sync",
+                    "Sync",
+                    d.sync_enabled,
+                    |s, v| s.sync_enabled = v,
+                    cx,
+                ));
+        let sign_out = has_token.then(|| {
+            Button::new("sign-out")
+                .small()
+                .label("Sign out")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.model.update(cx, |model, cx| model.sign_out(cx));
+                    cx.notify();
+                }))
+        });
+        // MyAnimeList signs in through the browser and its own dialog; the
+        // paste field for when that fails lives there (mockup 2).
+        let mal_sign_in = h_flex().gap_2().child(
+            Button::new("mal-sign-in")
+                .small()
+                .primary()
+                .icon(AppIcon::LogIn)
+                .label(if has_token {
+                    "Sign in again"
+                } else {
+                    "Sign in"
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    crate::ui::mal_sign_in::open(&this.model, window, cx)
+                })),
+        );
         let sign_in = h_flex()
             .gap_2()
             .child(
@@ -874,12 +918,16 @@ impl SettingsView {
                     .label("Sign in")
                     .on_click(cx.listener(|this, _, window, cx| this.sign_in(window, cx))),
             );
+        let sign_in = match service {
+            ServiceId::MyAnimeList => mal_sign_in,
+            _ => sign_in,
+        };
         body.child(
             v_flex()
                 .gap_2()
-                .child(widgets::section_label("AniList account", cx))
+                .child(widgets::section_label(format!("{name} account"), cx))
                 .child(account_card)
-                .child(sign_in),
+                .child(sign_in.children(sign_out)),
         )
         .when(can_upload, |el| {
             el.child(
@@ -892,7 +940,7 @@ impl SettingsView {
                                 "upload",
                                 AppIcon::CloudUpload,
                                 "Upload",
-                                "Add it to your AniList list",
+                                format!("Add it to your {name} list"),
                                 cx,
                             )
                             .flex_none()

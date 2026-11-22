@@ -36,12 +36,7 @@ impl ScoreFormat {
     }
 }
 
-/// One choice in the score menu.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Rating {
-    pub value: u8,
-    pub label: String,
-}
+pub use crate::score::Rating;
 
 fn rating(value: u8, label: impl Into<String>) -> Rating {
     Rating {

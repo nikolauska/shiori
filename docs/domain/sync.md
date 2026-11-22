@@ -2,11 +2,13 @@
 
 ## List services
 
-Shiori works with AniList, MyAnimeList and Kitsu. One of them is active at a time. Each service has its own separate copy of your list inside Shiori; switching the active service switches to that copy and does not move anything between services.
+Shiori works with AniList and MyAnimeList; Kitsu is planned. One of them is active at a time. Each service has its own separate copy of your list inside Shiori, with its own library links, episode numbering and history; switching the active service switches to that copy and does not move anything between services. Switching back finds everything where you left it. You switch by picking the service's card under "Your list" in Settings.
+
+MyAnimeList has no exact airing times, only a weekly time slot. With MyAnimeList as your service, Shiori asks AniList when the next episode of each airing anime in your list comes out, after every list fetch, so the Home schedule and the "new episodes" badges work the same as with AniList. Those requests carry MyAnimeList ids, nothing about you.
 
 ## Keeping your list on this computer
 
-You don't need an account. On first start, without one, Shiori asks where your list should live: on this computer, or in your AniList account. You can change it later in Settings.
+You don't need an account. On first start, without one, Shiori asks where your list should live: on this computer, in your AniList account, or in your MyAnimeList account. Choosing MyAnimeList opens the sign-in right away. You can change it later in Settings.
 
 A list on this computer:
 
@@ -32,33 +34,37 @@ Only anime that are not in your list yet are added; anything already there is le
 
 Any list can be exported as a MyAnimeList XML file, which MyAnimeList and AniList both import. Anime without a MyAnimeList id cannot be in it; Shiori names them after exporting.
 
-It is kept apart from your AniList list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens your AniList list as you left it, and the list on this computer stays, so you can switch back.
+It is kept apart from your account's list. Moving to this computer for the first time asks whether to start empty or with a copy of your current list; changes waiting to be sent are not copied. Moving back to your account opens that list as you left it, and the list on this computer stays, so you can switch back.
 
 ### Uploading to your account
 
-When you move a list that has anime in it to your AniList account and are signed in, Shiori asks whether to upload it. If you are not signed in yet, sign in first; Settings then offers "Upload it to AniList" for as long as the list on this computer exists.
+When you move a list that has anime in it to your AniList or MyAnimeList account and are signed in, Shiori asks whether to upload it. If you are not signed in yet, sign in first; Settings then offers "Add it to your AniList list" (or MyAnimeList) for as long as the list on this computer exists.
 
-Uploading first fetches your AniList list, so it works with what is there now, then:
+Uploading first fetches your account's list, so it works with what is there now, then:
 
-- Adds every anime AniList does not have.
-- For anime on both, moves progress and status forward only (Completed beats Watching; Watching, On hold and Dropped don't replace each other), and fills in score, notes and dates only where AniList has none.
-- Removes nothing from AniList.
+- Adds every anime the account does not have.
+- For anime on both, moves progress and status forward only (Completed beats Watching; Watching, On hold and Dropped don't replace each other), and fills in score, notes and dates only where the account has none.
+- Removes nothing from the account.
 
-The changes are sent like any other edit. If AniList cannot be reached, nothing is uploaded and Shiori says so.
+The list on this computer uses AniList's anime. Uploading to MyAnimeList matches each one by its MyAnimeList id; an anime MyAnimeList does not have stays only on this computer, and Shiori names it (or says how many there are) before and after uploading.
+
+The changes are sent like any other edit. If the service cannot be reached, nothing is uploaded and Shiori says so.
 
 ## Signing in
 
 | Service | How you sign in |
 | --- | --- |
 | AniList | You approve Shiori on the AniList website and give Shiori the access code AniList shows you |
-| MyAnimeList | You approve Shiori on the MyAnimeList website |
+| MyAnimeList | Shiori opens the MyAnimeList website in your browser; you approve Shiori there and the browser hands the sign-in back to Shiori by itself. If that fails (the browser says it can't connect), you copy the address from the browser's address bar into Shiori. |
 | Kitsu | You enter your Kitsu email (or username) and password in Shiori |
 
 Shiori keeps your sign-in details in your operating system's password store, not in a plain file.
 
 Without signing in, Shiori can still show a public list if you enter the username, but it cannot change anything on the service.
 
-AniList sign-ins eventually expire. Shiori then tells you to approve it again in the settings.
+AniList sign-ins eventually expire. Shiori then tells you to approve it again in the settings. MyAnimeList sign-ins renew themselves in the background; only if that fails does Shiori ask you to sign in again.
+
+"Sign out" in Settings removes the stored sign-in. Your list and username stay, so a public list can still be shown.
 
 ## What synchronizing does
 
