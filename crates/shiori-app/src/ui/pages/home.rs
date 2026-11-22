@@ -67,8 +67,8 @@ impl HomePage {
                                 .rounded_full()
                                 .text_xs()
                                 .font_semibold()
-                                .bg(style::gradient())
-                                .text_color(gpui::white())
+                                .bg(style::badge_on_image(cx))
+                                .text_color(style::accent(cx))
                                 .child(format!("{new} new")),
                         ),
                 )

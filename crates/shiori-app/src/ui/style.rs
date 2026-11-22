@@ -38,6 +38,12 @@ pub fn accent_soft(cx: &App) -> Hsla {
     })
 }
 
+/// The badge tint made opaque, for badges laid over a poster. The plain
+/// tint lets the artwork show through and the text gets lost in it.
+pub fn badge_on_image(cx: &App) -> Hsla {
+    cx.theme().background.blend(accent_soft(cx))
+}
+
 /// The app icon at 64 px, for the sidebar logo.
 pub fn logo() -> Arc<Image> {
     Arc::new(Image::from_bytes(

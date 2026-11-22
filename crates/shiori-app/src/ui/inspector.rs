@@ -1110,12 +1110,14 @@ impl Inspector {
 pub fn badge(state: &shiori_app::state::AppState, id: AnimeId, cx: &App) -> Option<AnyElement> {
     let anime = state.anime.get(&id)?;
     let new = new_episodes(Some(anime), state.entries.get(&id));
-    let (text, strong) = if new > 0 {
-        (format!("{new} new"), true)
+    // "New" and "airing" badges share the calm accent tint: small text on
+    // the bright gradient was hard to read.
+    let text = if new > 0 {
+        format!("{new} new")
     } else {
         let time = anime.next_episode_time?;
         let when = airing_label(time, Timestamp::now(), &jiff::tz::TimeZone::system());
-        (format!("Ep {} {when}", anime.last_aired_episode + 1), false)
+        format!("Ep {} {when}", anime.last_aired_episode + 1)
     };
     Some(
         div()
@@ -1124,14 +1126,8 @@ pub fn badge(state: &shiori_app::state::AppState, id: AnimeId, cx: &App) -> Opti
             .rounded_full()
             .text_xs()
             .font_semibold()
-            .when(strong, |badge| {
-                badge.bg(style::gradient()).text_color(gpui::white())
-            })
-            .when(!strong, |badge| {
-                badge
-                    .bg(style::accent_soft(cx))
-                    .text_color(style::accent(cx))
-            })
+            .bg(style::accent_soft(cx))
+            .text_color(style::accent(cx))
             .child(text)
             .into_any_element(),
     )

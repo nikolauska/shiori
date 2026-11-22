@@ -465,8 +465,8 @@ impl MainWindow {
                 .rounded_full()
                 .text_xs()
                 .font_semibold()
-                .bg(style::gradient())
-                .text_color(gpui::white())
+                .bg(style::accent_soft(cx))
+                .text_color(style::accent(cx))
                 .child(new_count.to_string())
                 .into_any_element()
         });
