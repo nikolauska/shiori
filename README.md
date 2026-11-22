@@ -43,6 +43,7 @@ Shiori follows your system theme, or you can pick light or dark in Settings.
 | --- | --- |
 | ![Shiori's Home page in the light theme: Continue watching posters and the airing schedule for the week](docs/screenshots/home-light.png) | ![Shiori's Home page in the dark theme: Continue watching posters and the airing schedule for the week](docs/screenshots/home-dark.png) |
 | ![The Watching list in the light theme](docs/screenshots/list-light.png) | ![The Watching list in the dark theme](docs/screenshots/list-dark.png) |
+| ![Settings in the light theme: choose where your list lives, on this computer, on AniList or on MyAnimeList](docs/screenshots/settings-light.png) | ![Settings in the dark theme: choose where your list lives, on this computer, on AniList or on MyAnimeList](docs/screenshots/settings-dark.png) |
 
 ## Status
 
