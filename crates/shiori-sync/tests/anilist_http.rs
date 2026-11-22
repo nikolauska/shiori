@@ -69,7 +69,8 @@ async fn authenticate_sends_the_token() {
     assert_eq!(info.rating_system, "POINT_10_DECIMAL");
     let request = server.await.unwrap().to_lowercase();
     assert!(request.contains("authorization: bearer tok"), "{request}");
-    assert!(request.contains("user-agent: shiori/0.1"), "{request}");
+    let agent = format!("user-agent: {}", shiori_sync::USER_AGENT.to_lowercase());
+    assert!(request.contains(&agent), "{request}");
     assert!(request.contains("viewer"), "{request}");
 }
 

@@ -81,7 +81,15 @@ mod tests {
 
     #[test]
     fn user_agent_has_major_and_minor_only() {
-        assert_eq!(USER_AGENT, "Shiori/0.1");
+        // Built from the package version, so a hard-coded value would break
+        // on every minor release.
+        let expected = format!(
+            "Shiori/{}.{}",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR")
+        );
+        assert_eq!(USER_AGENT, expected);
+        assert_eq!(USER_AGENT.matches('.').count(), 1);
     }
 
     #[test]
