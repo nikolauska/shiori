@@ -1,3 +1,40 @@
 // The exe's icon, for Explorer, the taskbar and Alt+Tab. gpui loads icon
 // resource 1 as the window icon on Windows, so the id must stay 1.
 1 ICON "../../assets/icon.ico"
+
+// Written by build.rs from Cargo.toml, so the version has one source.
+#include "shiori_version.h"
+
+// Explorer's Properties > Details tab, the installer and "Installed apps"
+// read the product name and version from here. The numbers are written out
+// instead of taken from winver.h, which not every resource compiler finds.
+1 VERSIONINFO
+FILEVERSION SHIORI_VERSION_NUMBERS
+PRODUCTVERSION SHIORI_VERSION_NUMBERS
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0x0
+// VOS_NT_WINDOWS32 and VFT_APP.
+FILEOS 0x40004
+FILETYPE 0x1
+FILESUBTYPE 0x0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // US English, Unicode.
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Shiori"
+            VALUE "FileDescription", "Shiori"
+            VALUE "FileVersion", SHIORI_VERSION_TEXT
+            VALUE "InternalName", "shiori"
+            VALUE "LegalCopyright", "GNU General Public License, version 3 or later"
+            VALUE "OriginalFilename", "shiori.exe"
+            VALUE "ProductName", "Shiori"
+            VALUE "ProductVersion", SHIORI_VERSION_TEXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
