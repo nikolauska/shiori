@@ -65,6 +65,21 @@ jobs:
           New-Item -ItemType Directory $env:PACKAGE | Out-Null
           Copy-Item target/release/shiori.exe, LICENSE, README.md $env:PACKAGE
           Compress-Archive -Path $env:PACKAGE -DestinationPath "$env:PACKAGE.zip"
+      # The installer adds a Start menu entry and an uninstaller, and updates
+      # an earlier install in place; the zip stays for people who want to
+      # run Shiori from a folder of their own. GitHub's Windows images
+      # usually come with Inno Setup; install it when this one does not.
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $default = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $default)) { choco install innosetup --no-progress -y }
+            $iscc = $default
+          }
+          & $iscc /Qp "/DAppVersion=${{ needs.version.outputs.version }}" "/DSourceDir=$PWD\target\release" packaging\windows\shiori.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The icon and the .desktop file let users add Shiori to their app
       # menu; the binary itself needs neither.
       - if: runner.os == 'Linux'
@@ -80,6 +95,7 @@ jobs:
           name: ${{ matrix.name }}
           path: |
             ${{ env.PACKAGE }}.zip
+            ${{ env.PACKAGE }}-setup.exe
             ${{ env.PACKAGE }}.tar.gz
           if-no-files-found: error
 
