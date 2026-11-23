@@ -6662,7 +6662,7 @@ dependencies = [
 
 [[package]]
 name = "shiori-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "embed-resource",
@@ -6695,7 +6695,7 @@ dependencies = [
 
 [[package]]
 name = "shiori-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anitomy-ng",
  "bitflags 2.13.2",
@@ -6711,7 +6711,7 @@ dependencies = [
 
 [[package]]
 name = "shiori-detect"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "regex",
  "thiserror 2.0.21",
@@ -6723,7 +6723,7 @@ dependencies = [
 
 [[package]]
 name = "shiori-library"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jiff",
  "shiori-core",
@@ -6732,7 +6732,7 @@ dependencies = [
 
 [[package]]
 name = "shiori-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "directories",
  "jiff",
@@ -6750,7 +6750,7 @@ dependencies = [
 
 [[package]]
 name = "shiori-sync"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "fastrand",
  "jiff",
