@@ -95,6 +95,7 @@ impl MainWindow {
                             .autohide(true);
                         window.push_notification(notification, cx);
                     }
+                    UiRequest::UpdateAvailable => this.show_update_notice(window, cx),
                 },
             ),
             cx.observe_window_bounds(window, |this, window, cx| {
@@ -109,6 +110,12 @@ impl MainWindow {
         ];
         let pages = pages::Pages::new(&model, window, cx);
         let inspector = cx.new(|cx| Inspector::new(model.clone(), window, cx));
+        // A release found while the window was closed to the tray. Deferred,
+        // since notifications go to the window's root, which is set up after
+        // this view.
+        cx.defer_in(window, |this, window, cx| {
+            this.show_update_notice(window, cx)
+        });
         Self {
             model,
             page: Page::AnimeList(Some(ListStatus::Watching)),
@@ -121,6 +128,34 @@ impl MainWindow {
             split: cx.new(|_| ResizableState::default()),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Says that a newer Shiori is out, once per release.
+    fn show_update_notice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let release = self.model.update(cx, |model, _| {
+            if model.update_noticed {
+                return None;
+            }
+            model.update_noticed = true;
+            model.update.clone()
+        });
+        let Some(release) = release else {
+            return;
+        };
+        let page = release.page.clone();
+        // The release page has the notes and every download, so the notice
+        // only has to say what came out and point there.
+        let notification = Notification::info("See what's new and get the update.")
+            .title(format!("Shiori {} is out", release.version))
+            .action(move |_, _, _| {
+                let page = page.clone();
+                Button::new("open-release")
+                    .small()
+                    .icon(IconName::ExternalLink)
+                    .label("Download")
+                    .on_click(move |_, _, cx| cx.open_url(&page))
+            });
+        window.push_notification(notification, cx);
     }
 
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {

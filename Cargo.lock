@@ -6678,6 +6678,7 @@ dependencies = [
  "notify-rust",
  "reqwest",
  "roxmltree 0.21.2",
+ "serde",
  "shiori-core",
  "shiori-detect",
  "shiori-library",

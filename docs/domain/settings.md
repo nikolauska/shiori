@@ -24,6 +24,7 @@ Every setting, what it does, and its starting value.
 | Setting | Starts as | What it does |
 | --- | --- | --- |
 | Color scheme | Follow the system | Light or dark appearance |
+| Tell me when a new version of Shiori is out | On | Shiori looks for a newer release when it starts and once a day while it runs, and shows a notice with a link to download it. It only tells you; it never downloads or installs anything by itself. Test versions (pre-releases) are not offered. |
 
 ## Media players
 

@@ -22,6 +22,7 @@ use shiori_app::service::ActiveService;
 use shiori_app::posters;
 use shiori_app::startup::Context as Startup;
 use shiori_app::state::{AppEvent, AppState};
+use shiori_app::update::Release;
 
 use super::format;
 use super::library::Library;
@@ -72,6 +73,12 @@ pub struct Model {
     /// Called when an update needs the user's say; the UI decides how to
     /// ask (a notification, unless the main window is active).
     pub confirm_hook: Option<ConfirmHook>,
+    /// A newer release found by the update check.
+    pub update: Option<Release>,
+    /// The main window has shown the notice for `update`. Kept apart from
+    /// `update` because the check can find it while the window is closed to
+    /// the tray; the window then shows it when it opens again.
+    pub update_noticed: bool,
 }
 
 impl EventEmitter<AppEvent> for Model {}
@@ -89,6 +96,8 @@ pub enum UiRequest {
         detail: SharedString,
         folder: std::path::PathBuf,
     },
+    /// The update check found a newer release.
+    UpdateAvailable,
 }
 
 impl EventEmitter<UiRequest> for Model {}
@@ -130,6 +139,8 @@ impl Model {
             tracker: Tracker::default(),
             relations: HashMap::new(),
             confirm_hook: None,
+            update: None,
+            update_noticed: false,
         })
     }
 
@@ -412,6 +423,9 @@ impl Model {
         if detection_changed {
             self.detection_settings_changed(cx);
         }
+        if !before.check_for_updates && self.state().settings.check_for_updates {
+            self.check_for_update(cx);
+        }
         // A scan of the old folders would show the wrong tree.
         if before.library_folders != self.state().settings.library_folders && self.library.scanned {
             self.scan_library(cx);
@@ -424,6 +438,39 @@ impl Model {
         let mut settings = self.state().settings.clone();
         flip(&mut settings);
         self.apply_settings(settings, None, cx);
+    }
+
+    /// Looks for a newer release, when the setting allows it. Not through
+    /// `request`, which shows a busy state and failures in the status bar:
+    /// the user did not ask for this check, so a failed one is only logged.
+    pub fn check_for_update(&mut self, cx: &mut Context<Self>) {
+        if !self.state().settings.check_for_updates {
+            return;
+        }
+        let http = self.http.clone();
+        let handle = self
+            .runtime
+            .spawn(async move { shiori_app::update::check(&http).await });
+        cx.spawn(async move |this, cx| {
+            let result = handle.await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(Ok(Some(release))) => {
+                    // The daily check finds the same release again; say so
+                    // once per version, not once per day.
+                    if this.update.as_ref() != Some(&release) {
+                        tracing::info!("Shiori {} is available", release.version);
+                        this.update = Some(release);
+                        this.update_noticed = false;
+                        cx.emit(UiRequest::UpdateAvailable);
+                        cx.notify();
+                    }
+                }
+                Ok(Ok(None)) => {}
+                Ok(Err(error)) => tracing::warn!("Could not check for updates: {error:#}"),
+                Err(error) => tracing::warn!("Could not check for updates: {error}"),
+            });
+        })
+        .detach();
     }
 
     /// Writes the list as Markdown and says how it went.

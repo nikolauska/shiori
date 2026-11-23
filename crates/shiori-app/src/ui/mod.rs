@@ -158,6 +158,7 @@ pub fn run(startup: Startup, instance: Option<UnboundedReceiver<Request>>) -> Re
 
         start_tracking(&model, cx);
         start_refreshing(&model, cx);
+        start_update_checks(&model, cx);
 
         tracing::debug!("Opening the main window");
         let Some(main_window) = show_main_window(&model, cx) else {
@@ -315,6 +316,23 @@ fn start_refreshing(model: &Entity<Model>, cx: &mut App) {
             }
             cx.background_executor()
                 .timer(Duration::from_secs(60 * 60))
+                .await;
+        }
+    })
+    .detach();
+}
+
+/// Checks for a newer release at start and then once a day, since Shiori
+/// can stay in the tray for weeks.
+fn start_update_checks(model: &Entity<Model>, cx: &mut App) {
+    let model = model.downgrade();
+    cx.spawn(async move |cx| {
+        loop {
+            if model.update(cx, Model::check_for_update).is_err() {
+                break;
+            }
+            cx.background_executor()
+                .timer(Duration::from_secs(24 * 60 * 60))
                 .await;
         }
     })

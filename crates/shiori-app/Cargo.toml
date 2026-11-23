@@ -20,6 +20,7 @@ fastrand.workspace = true
 flate2.workspace = true
 reqwest.workspace = true
 roxmltree.workspace = true
+serde.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-kit-assets.workspace = true

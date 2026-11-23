@@ -47,6 +47,8 @@ pub struct ProxySettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub color_scheme: ColorScheme,
+    /// Look for a newer Shiori release on GitHub and say when there is one.
+    pub check_for_updates: bool,
     pub service: ServiceId,
     /// `None` until the user has chosen; Shiori asks on start until then.
     pub list: Option<ListLocation>,
@@ -76,6 +78,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             color_scheme: ColorScheme::System,
+            check_for_updates: true,
             service: ServiceId::AniList,
             list: None,
             sync_enabled: true,
@@ -158,6 +161,7 @@ fn read(doc: &DocumentMut) -> Settings {
             Some("dark") => ColorScheme::Dark,
             _ => d.color_scheme,
         },
+        check_for_updates: bool_at("app.checkForUpdates", d.check_for_updates),
         service: match str_at("sync.service") {
             Some("myanimelist") => ServiceId::MyAnimeList,
             Some("kitsu") => ServiceId::Kitsu,
@@ -228,6 +232,7 @@ fn write(doc: &mut DocumentMut, s: &Settings) {
             .into(),
         ),
     );
+    set("app.checkForUpdates", Some(s.check_for_updates.into()));
     set("sync.service", Some(service_key(s.service).into()));
     set(
         "sync.list",
@@ -371,6 +376,7 @@ mod tests {
     fn every_key_changed() -> Settings {
         Settings {
             color_scheme: ColorScheme::Dark,
+            check_for_updates: false,
             service: ServiceId::Kitsu,
             list: Some(ListLocation::Local),
             sync_enabled: false,

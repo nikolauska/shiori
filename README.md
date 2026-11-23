@@ -50,14 +50,18 @@ Shiori follows your system theme, or you can pick light or dark in Settings.
 Shiori is in early releases. It works day to day, but some things are still missing:
 
 - **List services:** AniList and MyAnimeList are supported. Kitsu is planned for a later version.
-- **Installers:** there are no installers or distribution packages yet. The downloads below are the program in an archive.
+- **Installers:** Windows has an installer. Linux has no distribution packages yet; the download is the program in an archive.
 - **macOS:** not supported.
 
 ## Download
 
 Get the latest version from the [releases page](../../releases/latest).
 
-**Windows:** download `shiori-<version>-windows-x86_64.zip`, unpack it anywhere and run `shiori.exe`.
+**Windows:** download `shiori-<version>-windows-x86_64-setup.exe` and run it. It installs Shiori for your user only, without asking for administrator rights, and adds it to the Start menu and to "Installed apps", where you can uninstall it. To update, run the installer of the new version; your list and settings stay where they are. Shiori tells you when a new version is out (you can turn that off in Settings ▸ Application).
+
+If you'd rather not install anything, download `shiori-<version>-windows-x86_64.zip` instead, unpack it anywhere and run `shiori.exe`.
+
+Windows may warn that the installer comes from an unknown publisher, because it isn't signed yet. Choose "More info" and then "Run anyway".
 
 **Linux:** download `shiori-<version>-linux-x86_64.tar.gz` and unpack it. Shiori needs GTK 3, Vulkan (it draws with the graphics card), xkbcommon and the Ayatana AppIndicator library for the tray icon. Most desktops already have them. On Debian and Ubuntu:
 

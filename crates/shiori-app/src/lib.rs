@@ -17,4 +17,5 @@ pub mod startup;
 pub mod state;
 pub mod sync;
 pub mod tracking;
+pub mod update;
 pub mod upload;

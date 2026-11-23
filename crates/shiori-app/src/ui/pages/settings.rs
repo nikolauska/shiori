@@ -352,6 +352,18 @@ impl SettingsView {
         .detach();
     }
 
+    /// The running version, and the newer one when the check found it.
+    fn version_line(&self, cx: &App) -> String {
+        let current = env!("CARGO_PKG_VERSION");
+        match &self.model.read(cx).update {
+            Some(release) => format!(
+                "You're using Shiori {current}. Version {} is out.",
+                release.version
+            ),
+            None => format!("You're using Shiori {current}."),
+        }
+    }
+
     fn switch(
         &self,
         id: &'static str,
@@ -1056,6 +1068,21 @@ impl SettingsView {
                     |s, v| s.color_scheme = v,
                     cx,
                 )))
+                .child(div().h_3())
+                .child(widgets::section_label("Updates", cx))
+                .child(self.switch(
+                    "check-for-updates",
+                    "Tell me when a new version of Shiori is out",
+                    d.check_for_updates,
+                    |s, v| s.check_for_updates = v,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(self.version_line(cx)),
+                )
                 .into_any_element(),
             3 => self.players(cx),
             4 => v_flex()
