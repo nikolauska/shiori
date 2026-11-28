@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use gpui::{AnyWeakEntity, Context, Task};
-use jiff::Zoned;
+use jiff::ZonedDateTime;
 use shiori_core::recognition::{
     MatchReason, Relations, Resolved, is_generic_title, normalize, title_to_remember,
 };
@@ -330,7 +330,7 @@ impl Model {
     /// Remembers `title` as an alternative title of `id`, then looks at
     /// what it changes: the playing media and the library's files.
     pub fn link_title(&mut self, id: AnimeId, title: &str, cx: &mut Context<Self>) {
-        let today = Zoned::now().date().into();
+        let today = ZonedDateTime::now().date().into();
         let result = self.startup.state.link_title(id, title, today);
         self.apply(result, cx);
         self.recognize_library_title(title, cx);
@@ -417,7 +417,7 @@ impl Model {
         let Some(anime) = state.anime.get(&id) else {
             return;
         };
-        let today = Zoned::now().date().into();
+        let today = ZonedDateTime::now().date().into();
         let entry = entry_with_episode_watched(anime, state.entries.get(&id), number, today);
         let title = state.title(id);
         self.save_entry(entry, cx);

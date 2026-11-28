@@ -16,7 +16,7 @@ use crate::ui::model::Model;
 use crate::ui::{actions, inspector, widgets};
 
 fn time_label(time: jiff::Timestamp) -> String {
-    time.to_zoned(jiff::tz::TimeZone::system())
+    time.to_zoned_datetime(jiff::tz::TimeZone::system())
         .strftime("%Y-%m-%d %H:%M")
         .to_string()
 }

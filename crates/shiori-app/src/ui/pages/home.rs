@@ -130,7 +130,7 @@ impl HomePage {
                 );
                 let time = airing
                     .time
-                    .to_zoned(tz.clone())
+                    .to_zoned_datetime(tz.clone())
                     .strftime("%H:%M")
                     .to_string();
                 let poster = poster::view(&self.model, id, cx);
@@ -215,7 +215,9 @@ impl HomePage {
 
 impl Render for HomePage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let today = jiff::Zoned::now().strftime("%A, %-d %B").to_string();
+        let today = jiff::ZonedDateTime::now()
+            .strftime("%A, %-d %B")
+            .to_string();
         v_flex()
             .id("home")
             .size_full()

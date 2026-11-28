@@ -30,7 +30,7 @@ pub fn type_label(kind: AnimeType) -> &'static str {
 /// database.
 pub fn today_in_japan() -> jiff::civil::Date {
     jiff::Timestamp::now()
-        .to_zoned(jiff::tz::TimeZone::fixed(jiff::tz::offset(9)))
+        .to_zoned_datetime(jiff::tz::TimeZone::fixed(jiff::tz::offset(9)))
         .date()
 }
 

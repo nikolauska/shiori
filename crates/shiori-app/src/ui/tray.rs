@@ -79,7 +79,8 @@ fn build(detection_enabled: bool, local: bool) -> Result<(TrayIcon, MenuItem), S
 
 fn forward_events(sender: UnboundedSender<TrayCommand>) {
     let menu_sender = sender.clone();
-    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+    // muda 0.22 takes the handler as an Arc rather than a bare closure.
+    MenuEvent::set_event_handler(Some(std::sync::Arc::new(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
             SHOW => TrayCommand::Show,
             SYNCHRONIZE => TrayCommand::Synchronize,
@@ -89,7 +90,7 @@ fn forward_events(sender: UnboundedSender<TrayCommand>) {
             _ => return,
         };
         let _ = menu_sender.send(command);
-    }));
+    })));
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
         if let TrayIconEvent::Click {
             button: MouseButton::Left,

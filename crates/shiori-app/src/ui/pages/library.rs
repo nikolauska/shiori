@@ -68,7 +68,7 @@ fn size_label(bytes: u64) -> String {
 fn time_label(time: SystemTime) -> String {
     jiff::Timestamp::try_from(time)
         .map(|t| {
-            t.to_zoned(jiff::tz::TimeZone::system())
+            t.to_zoned_datetime(jiff::tz::TimeZone::system())
                 .strftime("%Y-%m-%d %H:%M")
                 .to_string()
         })

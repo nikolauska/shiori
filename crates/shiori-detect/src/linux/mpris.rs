@@ -3,10 +3,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use zbus::blocking::fdo::DBusProxy;
-use zbus::blocking::{Connection, Proxy, connection};
+use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
-use zbus::zvariant::OwnedValue;
+use zbus::{Connection, OwnedVariant, Proxy, block_on, connection};
 
 const PREFIX: &str = "org.mpris.MediaPlayer2.";
 
@@ -21,8 +20,15 @@ pub struct Report {
     pub playing: Option<bool>,
 }
 
+// zbus 6 has no blocking API any more. Detection runs on a plain thread,
+// so each call drives zbus's own per-thread runtime with `block_on`
+// instead of bringing in an async runtime just for MPRIS.
 pub fn connect() -> Option<Connection> {
-    match connection::Builder::session().and_then(|b| b.method_timeout(TIMEOUT).build()) {
+    match block_on(
+        connection::Builder::session()
+            .method_timeout(TIMEOUT)
+            .build(),
+    ) {
         Ok(connection) => Some(connection),
         Err(error) => {
             tracing::debug!("No session bus, so no MPRIS: {error}");
@@ -35,34 +41,36 @@ pub fn connect() -> Option<Connection> {
 /// the caller can reconnect; a single player that does not answer is
 /// skipped.
 pub fn reports(connection: &Connection) -> zbus::Result<Vec<Report>> {
-    let bus = DBusProxy::new(connection)?;
-    let names = bus.list_names()?;
-    let reports = names
-        .iter()
-        .filter(|name| name.as_str().starts_with(PREFIX))
-        .filter_map(|name| {
+    block_on(async {
+        let bus = DBusProxy::new(connection).await?;
+        let names = bus.list_names().await?;
+        let mut reports = Vec::new();
+        for name in names
+            .iter()
+            .filter(|name| name.as_str().starts_with(PREFIX))
+        {
             let name: BusName<'_> = name.inner().clone();
-            let pid = bus.get_connection_unix_process_id(name.clone()).ok()?;
-            match report(connection, name.clone(), pid) {
-                Ok(report) => Some(report),
-                Err(error) => {
-                    tracing::debug!("MPRIS player {name} did not answer: {error}");
-                    None
-                }
+            let Ok(pid) = bus.get_connection_unix_process_id(name.clone()).await else {
+                continue;
+            };
+            match report(connection, name.clone(), pid).await {
+                Ok(report) => reports.push(report),
+                Err(error) => tracing::debug!("MPRIS player {name} did not answer: {error}"),
             }
-        })
-        .collect();
-    Ok(reports)
+        }
+        Ok(reports)
+    })
 }
 
-fn report(connection: &Connection, name: BusName<'_>, pid: u32) -> zbus::Result<Report> {
+async fn report(connection: &Connection, name: BusName<'_>, pid: u32) -> zbus::Result<Report> {
     let player = Proxy::new(
         connection,
         name,
         "/org/mpris/MediaPlayer2",
         "org.mpris.MediaPlayer2.Player",
-    )?;
-    let metadata: HashMap<String, OwnedValue> = player.get_property("Metadata")?;
+    )
+    .await?;
+    let metadata: HashMap<String, OwnedVariant> = player.get_property("Metadata").await?;
     let text = |key: &str| {
         metadata
             .get(key)
@@ -72,6 +80,7 @@ fn report(connection: &Connection, name: BusName<'_>, pid: u32) -> zbus::Result<
     // Optional in the specification; some players leave it out.
     let playing = player
         .get_property::<String>("PlaybackStatus")
+        .await
         .ok()
         .map(|status| status == "Playing");
     Ok(Report {

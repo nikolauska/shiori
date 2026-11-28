@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.3.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-rust-version = "1.88"
+rust-version = "1.92"
 
 [workspace.dependencies]
 shiori-core = { path = "crates/shiori-core" }
@@ -16,16 +16,16 @@ shiori-sync = { path = "crates/shiori-sync" }
 shiori-library = { path = "crates/shiori-library" }
 
 anitomy-ng = "=1.0.10"
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 bitflags = { version = "2.13.2", features = ["serde"] }
 caseless = "0.2.2"
 directories = "6.0.0"
 # The UI framework. gpui-component 0.9.1 builds on gpui-pre, a snapshot of
 # Zed's gpui; update the three together.
-gpui = { package = "gpui-pre", version = "=0.3.12" }
-gpui-component = "=0.9.1"
+gpui = { package = "gpui-pre", version = "=0.3.14" }
+gpui-component = "=0.11.0"
 # The icons gpui-component draws; without them icon buttons are blank.
-gpui-kit-assets = "=0.9.1"
+gpui-kit-assets = "=0.11.0"
 # Picks the episode for "Random episode" and the anime for "Play random
 # anime"; already in the tree through gpui.
 fastrand = "2.5.0"
@@ -36,33 +36,33 @@ flate2 = "1.1.11"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # The Linux display backends are opt-in features; without them gpui
 # starts headless and no window ever appears.
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["wayland", "x11"] }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", features = ["wayland", "x11"] }
 keyring = "4.2.0"
-jiff = { version = "0.2.43", features = ["serde"] }
-regex = "1.13.1"
+jiff = { version = "1.0.3", features = ["serde"] }
+regex = "1.13.2"
 # Reads MyAnimeList XML list exports; already in the tree through gpui.
 roxmltree = "0.21.2"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "socks", "gzip", "json"] }
-rusqlite = { version = "0.42.0", features = ["backup", "bundled"] }
+rusqlite = { version = "0.43.0", features = ["backup", "bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt", "macros", "time"] }
-toml = "1.2.1"
-toml_edit = "0.25.19"
+toml = "1.2.3"
+toml_edit = "0.25.21"
 # Tray icon (decision I15). Only the gtk feature: libxdo is for menu
 # accelerators, which the tray menu does not use.
 # The tray icon needs a GTK main loop on Linux; same version as tray-icon uses.
-gtk = "0.18.2"
-tray-icon = { version = "0.24.2", default-features = false, features = ["gtk"] }
+gtk = "0.19.0"
+tray-icon = { version = "0.27.0", default-features = false, features = ["libappindicator"] }
 # The "Confirm list update" notification. gpui already uses this version
 # on Linux.
-notify-rust = { version = "4.17.0", default-features = false, features = ["z"] }
+notify-rust = { version = "4.19.0", default-features = false, features = ["z"] }
 tracing = "0.1.44"
 # Deleting from the Library page moves files to the trash or Recycle Bin,
 # so that a slip can be undone.
-trash = { version = "5.3.0", default-features = false, features = ["freedesktop", "coinit_apartmentthreaded"] }
+trash = { version = "5.4.0", default-features = false, features = ["freedesktop", "coinit_apartmentthreaded"] }
 tracing-subscriber = "0.3.23"
 unicode-normalization = "0.1.26"
 unicode-properties = "0.1.5"
@@ -83,10 +83,10 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 # Detection on Linux: window titles under X11. Pure Rust, no libxcb.
-x11rb = "0.13.2"
-# Detection on Linux: MPRIS on the session bus. gpui already pulls in this
-# version with async-io; the blocking API keeps detection off any runtime.
-zbus = { version = "5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+x11rb = "0.14.0"
+# Detection on Linux: MPRIS on the session bus. zbus 6 dropped the blocking
+# API; its default-rt runtime and block_on keep detection off tokio.
+zbus = { version = "6.5.0", default-features = false, features = ["default-rt", "proxy"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

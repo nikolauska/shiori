@@ -131,7 +131,7 @@ impl Model {
             return;
         }
         let dir = self.startup.folders.backups();
-        let today = jiff::Zoned::now().date();
+        let today = jiff::ZonedDateTime::now().date();
         match backup::back_up_weekly(self.state(), &dir, today) {
             Ok(Some(path)) => {
                 tracing::info!("Backed up the list to {}", path.display());
@@ -387,7 +387,7 @@ pub fn backed_up(last: Option<jiff::civil::Date>) -> String {
     let Some(last) = last else {
         return "Not backed up yet".to_owned();
     };
-    let today = jiff::Zoned::now().date();
+    let today = jiff::ZonedDateTime::now().date();
     if last == today {
         "Backed up today".to_owned()
     } else if last.tomorrow().ok() == Some(today) {

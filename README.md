@@ -79,7 +79,7 @@ install -Dm644 shiori.desktop ~/.local/share/applications/shiori.desktop
 
 ## Building from source
 
-You need Rust 1.88 or newer ([rustup](https://rustup.rs/) is the easiest way to get it).
+You need Rust 1.92 or newer ([rustup](https://rustup.rs/) is the easiest way to get it).
 
 On Linux, install the libraries gpui and the tray icon need. On Debian and Ubuntu:
 

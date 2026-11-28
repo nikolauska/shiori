@@ -372,8 +372,8 @@ impl Chip {
 /// `in 3 days`. Days are counted by local calendar date, not 24 hour steps,
 /// so 23:00 tonight is "today" and 01:00 is "tomorrow".
 pub fn airing_label(time: Timestamp, now: Timestamp, tz: &TimeZone) -> String {
-    let when = time.to_zoned(tz.clone());
-    let days = (when.date() - now.to_zoned(tz.clone()).date()).get_days();
+    let when = time.to_zoned_datetime(tz.clone());
+    let days = (when.date() - now.to_zoned_datetime(tz.clone()).date()).get_days();
     match days {
         ..0 => "aired".to_owned(),
         0 => format!("today {}", when.strftime("%H:%M")),

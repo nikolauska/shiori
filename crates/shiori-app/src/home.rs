@@ -50,7 +50,7 @@ pub struct Day {
 /// next episodes of Watching and Plan to watch anime that air on it. Only
 /// the next episode of each anime is known, so a weekly show appears once.
 pub fn airing_schedule(state: &AppState, now: Timestamp, tz: &TimeZone, days: i64) -> Vec<Day> {
-    let today = now.to_zoned(tz.clone()).date();
+    let today = now.to_zoned_datetime(tz.clone()).date();
     let mut schedule: Vec<Day> = (0..days)
         .filter_map(|n| today.checked_add(n.days()).ok())
         .map(|date| Day {
@@ -70,7 +70,7 @@ pub fn airing_schedule(state: &AppState, now: Timestamp, tz: &TimeZone, days: i6
         let Some(time) = anime.next_episode_time else {
             continue;
         };
-        let date = time.to_zoned(tz.clone()).date();
+        let date = time.to_zoned_datetime(tz.clone()).date();
         if let Some(day) = schedule.iter_mut().find(|d| d.date == date) {
             day.airings.push(Airing {
                 anime_id: anime.id,

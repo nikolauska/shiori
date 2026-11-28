@@ -12,7 +12,7 @@ use crate::{Detected, MediaInfoKind, Player, Strategy, WindowId, push_media, tit
 pub struct Backend {
     /// Connected on first use and again after a failure, so that a bus or
     /// display that comes up after Shiori is picked up.
-    bus: Option<zbus::blocking::Connection>,
+    bus: Option<zbus::Connection>,
     display: Option<x11::Display>,
 }
 

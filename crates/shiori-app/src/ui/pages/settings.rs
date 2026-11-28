@@ -222,7 +222,7 @@ impl SettingsView {
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(std::path::PathBuf::from)
             .unwrap_or_default();
-        let name = format!("shiori-backup-{}.sqlite", jiff::Zoned::now().date());
+        let name = format!("shiori-backup-{}.sqlite", jiff::ZonedDateTime::now().date());
         let path = cx.prompt_for_new_path(&home, Some(&name));
         let model = self.model.clone();
         cx.spawn_in(window, async move |_, cx| {
@@ -741,7 +741,7 @@ impl SettingsView {
                 .child(cards),
         );
         if local {
-            let today = jiff::Zoned::now().date();
+            let today = jiff::ZonedDateTime::now().date();
             // A backup older than the weekly one would be is worth a look.
             let fresh = last_backup.is_some_and(|last| {
                 last.checked_add(jiff::Span::new().days(8))

@@ -427,7 +427,11 @@ fn date_menu(
             .item(PopupMenuItem::new(airing_label).on_click(airing))
             .item(
                 PopupMenuItem::new("Set to last updated").on_click(set(|e, _| {
-                    FuzzyDate::from(e.last_updated.to_zoned(jiff::tz::TimeZone::system()).date())
+                    FuzzyDate::from(
+                        e.last_updated
+                            .to_zoned_datetime(jiff::tz::TimeZone::system())
+                            .date(),
+                    )
                 })),
             )
     })
