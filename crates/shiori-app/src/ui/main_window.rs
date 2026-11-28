@@ -2,8 +2,9 @@
 //! status line (decision I22).
 
 use gpui::{
-    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, PathPromptOptions, Render,
-    SharedString, Styled, Subscription, Window, div, img, prelude::*, px,
+    AnyElement, Context, Entity, FontWeight, IntoElement, MouseButton, NavigationDirection,
+    ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Window, div, img,
+    prelude::*, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
@@ -179,6 +180,42 @@ impl MainWindow {
             self.back.push(std::mem::replace(&mut self.page, page));
             self.show(cx);
         }
+    }
+
+    /// Where the full anime page's back button goes, named so the user
+    /// knows what they return to.
+    fn back_label(&self) -> SharedString {
+        match self.back.last() {
+            Some(Page::Home) => "Home".into(),
+            Some(Page::Search) => "Search".into(),
+            Some(Page::AnimeList(Some(status))) => pages::status_label(*status).into(),
+            Some(Page::AnimeList(None)) => "List".into(),
+            Some(Page::History) => "History".into(),
+            Some(Page::Library) => "Library".into(),
+            Some(Page::Anime(_)) | None => "Back".into(),
+        }
+    }
+
+    /// The full anime page covers the list, so it needs a way out that does
+    /// not depend on knowing Alt+Left or the mouse's back button.
+    fn render_anime_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .size_full()
+            .child(
+                h_flex().px_2().pt_2().child(
+                    Button::new("anime-page-back")
+                        .small()
+                        .ghost()
+                        .icon(IconName::ChevronLeft)
+                        .label(self.back_label())
+                        .tooltip("Back (Alt+Left)")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.go_back(&GoBack, window, cx)),
+                        ),
+                ),
+            )
+            .child(div().flex_1().min_h_0().child(self.inspector.clone()))
+            .into_any_element()
     }
 
     fn show(&mut self, cx: &mut Context<Self>) {
@@ -702,7 +739,7 @@ impl Render for MainWindow {
         // A full page of an anime only makes sense while it cannot be shown
         // beside the list; once it can, go back to where the user was.
         let page = match self.page {
-            Page::Anime(_) => self.inspector.clone().into_any_element(),
+            Page::Anime(_) => self.render_anime_page(cx),
             page => self.pages.render(page, window, cx),
         };
         let width = self.model.read(cx).session.inspector_width.unwrap_or(320.);
@@ -746,6 +783,16 @@ impl Render for MainWindow {
             .text_color(cx.theme().foreground)
             .on_action(cx.listener(Self::go_back))
             .on_action(cx.listener(Self::go_forward))
+            // Mice with side buttons are how many people go back; without
+            // this they did nothing anywhere in the app.
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(|this, _, window, cx| this.go_back(&GoBack, window, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(|this, _, window, cx| this.go_forward(&GoForward, window, cx)),
+            )
             .on_action(cx.listener(Self::synchronize))
             .on_action(cx.listener(Self::about))
             .on_action(cx.listener(Self::toggle_inspector))
